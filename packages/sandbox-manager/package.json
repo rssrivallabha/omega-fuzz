@@ -1,0 +1,17 @@
+{
+  "name": "@omega-fuzz/sandbox-manager",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@omega-fuzz/canonical-model": "*",
+    "@omega-fuzz/language-core": "*"
+  }
+}
