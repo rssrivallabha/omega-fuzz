@@ -1,13 +1,18 @@
 {
-  "name": "language-javascript",
+  "name": "@omega-fuzz/language-javascript",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "dependencies": {
+    "@omega-fuzz/canonical-model": "*",
+    "@omega-fuzz/language-core": "*"
+  },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "typescript": "^7.0.2"
+    "typescript": "^5.0.0"
   },
   "scripts": {
+    "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -1,0 +1,17 @@
+{
+  "name": "@omega-fuzz/language-go",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w"
+  },
+  "dependencies": {
+    "@omega-fuzz/language-core": "*",
+    "@omega-fuzz/canonical-model": "*"
+  },
+  "devDependencies": {
+    "typescript": "~5.3.3"
+  }
+}

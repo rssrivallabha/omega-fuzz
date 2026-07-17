@@ -1,0 +1,15 @@
+{
+  "name": "@omega-fuzz/language-sql",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@omega-fuzz/language-core": "*",
+    "@omega-fuzz/canonical-model": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

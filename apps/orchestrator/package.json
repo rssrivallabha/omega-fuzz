@@ -9,10 +9,17 @@
   "dependencies": {
     "@omega-fuzz/canonical-model": "*",
     "@omega-fuzz/language-core": "*",
+    "@omega-fuzz/language-javascript": "*",
     "@omega-fuzz/language-python": "*",
-    "@omega-fuzz/sandbox-manager": "*"
+    "@omega-fuzz/language-go": "*",
+    "@omega-fuzz/language-cpp": "*",
+    "@omega-fuzz/language-sql": "*",
+    "@omega-fuzz/language-swift": "*",
+    "@omega-fuzz/sandbox-manager": "*",
+    "uuid": "^14.0.1"
   },
   "devDependencies": {
+    "@types/uuid": "^10.0.0",
     "typescript": "^5.0.0"
   }
 }

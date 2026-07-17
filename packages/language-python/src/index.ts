@@ -265,9 +265,10 @@ export class PythonAdapter implements LanguageAdapter {
 
   async synthesizeSeeds(target: Target, constraints: ConstraintGraph): Promise<SeedCorpus> {
     const seeds: Seed[] = [];
-    const baseInput: any = {};
     
-    // Group constraints by parameter
+    // We will generate a base dict that satisfies standard Python requirements
+    // based on parameter names.
+    const baseInput: any = {};
     const paramConstraints = new Map<string, any[]>();
     for (const node of constraints.nodes) {
       if (!paramConstraints.has(node.parameterName)) {
@@ -276,47 +277,52 @@ export class PythonAdapter implements LanguageAdapter {
       paramConstraints.get(node.parameterName)!.push(node);
     }
 
-    // Synthesize based on constraints
     if (target.astNode && target.astNode.args && target.astNode.args.args) {
       target.astNode.args.args.forEach((arg: any) => {
         const paramName = arg.arg;
         const pConstraints = paramConstraints.get(paramName) || [];
         
-        let synthesizedValue: any = null;
-        
-        const typeConstraint = pConstraints.find(c => c.constraintType === 'type');
-        if (typeConstraint) {
-          if (typeConstraint.value === 'dict') synthesizedValue = {};
-          else if (typeConstraint.value === 'int') synthesizedValue = 0;
-          else if (typeConstraint.value === 'str') synthesizedValue = "";
-          else if (typeConstraint.value === 'list') synthesizedValue = [];
-        }
-        
-        const reqKeys = pConstraints.filter(c => c.constraintType === 'required_keys');
-        if (reqKeys.length > 0 && typeof synthesizedValue === 'object') {
-          for (const req of reqKeys) {
-            for (const key of req.value) {
-              synthesizedValue[key] = "test"; // Basic fill
-            }
-          }
-        }
+        let synthesizedValue: any = 0; // default int
+
+        pConstraints.forEach(c => {
+           if (c.constraintType === 'type') {
+               if (c.value === 'dict') synthesizedValue = {};
+               else if (c.value === 'list') synthesizedValue = [];
+               else if (c.value === 'str') synthesizedValue = "fuzz";
+               else if (c.value === 'int') synthesizedValue = 42;
+               else if (c.value === 'float') synthesizedValue = 3.14;
+           }
+           if (c.constraintType === 'required_keys') {
+               if (typeof synthesizedValue !== 'object') synthesizedValue = {};
+               c.value.forEach((k: string) => { synthesizedValue[k] = "fuzz"; });
+           }
+        });
         
         baseInput[paramName] = synthesizedValue;
       });
     }
 
-    seeds.push({
-      id: 'seed_valid_01',
-      input: baseInput,
-      source: 'SYNTHESIZED'
-    });
+    // Seed 1: The fully constrained valid input
+    seeds.push({ id: 'seed_valid_01', input: { value: baseInput }, source: 'SYNTHESIZED' });
     
-    // Add some malformed seeds to bootstrap
-    seeds.push({
-      id: 'seed_malformed_01',
-      input: { transaction: null },
-      source: 'SYNTHESIZED'
-    });
+    // Seed 2: Empty dict (often causes KeyError / validation crash)
+    const emptyInput: any = {};
+    if (target.astNode && target.astNode.args && target.astNode.args.args) {
+        target.astNode.args.args.forEach((arg: any) => { emptyInput[arg.arg] = {}; });
+    }
+    seeds.push({ id: 'seed_empty_01', input: { value: emptyInput }, source: 'SYNTHESIZED' });
+
+    // Seed 3: Wrong types (e.g. passing strings where dict expected)
+    const badInput: any = {};
+    if (target.astNode && target.astNode.args && target.astNode.args.args) {
+        target.astNode.args.args.forEach((arg: any) => { badInput[arg.arg] = "invalid_string_type"; });
+    }
+    seeds.push({ id: 'seed_bad_type_01', input: { value: badInput }, source: 'SYNTHESIZED' });
+
+    // Ensure we have at least something to fuzz
+    if (seeds.length === 0) {
+        seeds.push({ id: 'fallback', input: { value: { a: 1 } }, source: 'SYNTHESIZED' });
+    }
     
     return { seeds };
   }
@@ -328,9 +334,35 @@ import sys
 import json
 import traceback
 
+${(target as any).source || ''}
+
 def main():
-    # To be implemented with raw output constraints
-    pass
+    for line in sys.stdin:
+        line = line.strip()
+        if not line: continue
+        try:
+            # We expect JSON representing the arguments dict
+            kwargs = json.loads(line)
+            # Call target function
+            result = ${target.name}(**kwargs)
+            print(json.dumps({"status": "success"}))
+        except Exception as e:
+            tb = traceback.extract_tb(sys.exc_info()[2])
+            trace_frames = [{"filename": frame.filename, "name": frame.name, "lineno": frame.lineno} for frame in tb]
+            
+            error_data = {
+                "status": "error",
+                "type": type(e).__name__,
+                "message": str(e),
+                "trace": trace_frames
+            }
+            print(json.dumps(error_data))
+        
+        # Flush to ensure orchestrator reads stdout immediately
+        sys.stdout.flush()
+
+if __name__ == "__main__":
+    main()
 `,
       entryPoint: 'main',
       dependencies: []
@@ -350,7 +382,25 @@ def main():
   }
 
   async parseCrash(execution: RawExecutionResult): Promise<NormalizedCrash | null> {
-    return null;
+      try {
+          if (!execution.stdout) return null;
+          // The output might have multiple lines if we executed multiple seeds,
+          // but we read the last JSON line or any JSON line with error
+          const lines = execution.stdout.split('\\n').filter(l => l.trim() !== '');
+          for (const line of lines) {
+              const data = JSON.parse(line);
+              if (data.status === 'error') {
+                  const frames = data.trace.map((f: any) => `${f.filename}:${f.lineno} in ${f.name}`);
+                  return {
+                      exceptionType: data.type,
+                      stackTrace: { frames }
+                  } as any;
+              }
+          }
+      } catch (e) {
+          // Parsing error
+      }
+      return null;
   }
 
   async normalizeStackTrace(trace: string): Promise<NormalizedStackTrace> {
