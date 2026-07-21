@@ -62,6 +62,10 @@ app.post('/api/fuzz', (req, res) => {
   res.json({ message: 'Campaign started' });
 });
 
-app.listen(3001, () => {
-  console.log('SSE API running on http://localhost:3001');
-});
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  app.listen(3001, () => {
+    console.log('SSE API running on http://localhost:3001');
+  });
+}
+
+export default app;

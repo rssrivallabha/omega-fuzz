@@ -41,7 +41,9 @@ export default function App() {
     if (appState !== 'ANALYSIS' && appState !== 'LIVE') return;
 
     if (!eventSourceRef.current) {
-      eventSourceRef.current = new EventSource('http://localhost:3001/api/stream');
+      eventSourceRef.current = new EventSource(
+        import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/stream` : '/api/stream'
+      );
       
       let lastExecuted = 0;
       let lastTime = Date.now();
@@ -156,10 +158,12 @@ export default function App() {
     setAppState('ANALYSIS');
     
     try {
-      await fetch('http://localhost:3001/api/fuzz', {
+      const apiUrl = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/fuzz` : '/api/fuzz';
+      await fetch(apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, maxInputs })
+        headers: {
+          'Content-Type': 'application/json'
+        },body: JSON.stringify({ code, maxInputs })
       });
       // Removed generic addTimelineEvent
     } catch (err) {
