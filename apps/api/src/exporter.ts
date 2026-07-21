@@ -38,7 +38,7 @@ export class ReportExporter {
 - Expected Rejections: ${report.summary.expected_rejections}
 
 ## Findings
-${report.findings.map(f => `
+${report.findings.map((f: any) => `
 ### ${f.id} [${f.severity}]
 - **Category:** ${f.fingerprint.outcomeCategory}
 - **Type:** ${f.fingerprint.exceptionType}
