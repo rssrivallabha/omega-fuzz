@@ -1,168 +1,188 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, Code2, Play } from 'lucide-react';
+import { Code2, Play, Activity, Settings2 } from 'lucide-react';
 
 interface LandingProps {
-  onStart: (code: string) => void;
+  onStart: (code: string, maxInputs: number) => void;
 }
 
 export function Landing({ onStart }: LandingProps) {
   const [code, setCode] = useState(
-`const processOrder = (order) => {
-  if (!order.id) throw new Error("Missing ID");
-  if (order.total < 0) throw new Error("Invalid Total");
-  return { status: "success", data: order };
-};`
+`def process_transaction(tx):
+    if not tx.get("id"):
+        raise ValueError("Missing ID")
+    if tx.get("amount", 0) < 0:
+        raise ValueError("Invalid Amount")
+    return {"status": "success", "data": tx}`
   );
   
-  const [detectedLang, setDetectedLang] = useState('JavaScript');
+  const [detectedLang, setDetectedLang] = useState('Python');
+  const [maxInputs, setMaxInputs] = useState<number>(150);
   
   useEffect(() => {
       if (code.includes('def ') || code.includes('import ') && !code.includes('const') && !code.includes('=>')) {
           setDetectedLang('Python');
       } else {
-          setDetectedLang('JavaScript / TypeScript');
+          setDetectedLang('JavaScript');
       }
   }, [code]);
 
-  return (
-    <div className="landing-container" style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '2rem',
-        position: 'relative',
-        zIndex: 1
-    }}>
-      {/* Aesthetic Cyber Elements */}
-      <div style={{
-          position: 'absolute',
-          top: '20%',
-          left: '10%',
-          width: '300px',
-          height: '300px',
-          background: 'var(--accent-cyan-glow)',
-          filter: 'blur(100px)',
-          borderRadius: '50%',
-          zIndex: -1
-      }} />
-      <div style={{
-          position: 'absolute',
-          bottom: '10%',
-          right: '15%',
-          width: '250px',
-          height: '250px',
-          background: 'var(--primary-glow)',
-          filter: 'blur(100px)',
-          borderRadius: '50%',
-          zIndex: -1
-      }} />
+  const handleInputLimitChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = parseInt(e.target.value);
+    if (isNaN(val)) val = 25;
+    setMaxInputs(val);
+  };
 
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
+  const enforceBounds = () => {
+    if (maxInputs < 25) setMaxInputs(25);
+    if (maxInputs > 250) setMaxInputs(250);
+  };
+
+  const estimatedSeconds = (maxInputs / 15).toFixed(1);
+
+  return (
+    <div className="flex-col items-center justify-center" style={{ minHeight: '100vh', padding: '2rem' }}>
+      
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        style={{ textAlign: 'center', maxWidth: '800px', marginBottom: '3rem' }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="flex-col items-center gap-2"
+        style={{ marginBottom: '2.5rem' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '1rem' }}>
-            <Shield size={48} color="var(--accent-cyan)" />
-            <h1 style={{ fontSize: '3.5rem', fontWeight: 800, letterSpacing: '-0.05em', margin: 0, background: 'linear-gradient(to right, #fff, #a1a1aa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                OMEGA FUZZ
-            </h1>
+        <div className="flex items-center gap-3">
+          <Activity size={24} color="var(--accent-brand)" />
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>Omega Fuzz</h1>
         </div>
-        <p style={{ fontSize: '1.25rem', color: '#a1a1aa', fontWeight: 300, lineHeight: 1.6 }}>
-          Automated multi-language target discovery and continuous fuzzing engine.
-        </p>
+        <p className="text-secondary text-sm">Engine ready. Waiting for target source.</p>
       </motion.div>
 
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.2 }}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.1 }}
+        className="panel flex-col"
         style={{
-            width: '100%',
-            maxWidth: '900px',
-            background: 'var(--glass-bg)',
-            border: '1px solid var(--glass-border)',
-            borderRadius: 'var(--radius-lg)',
-            padding: '2px',
-            backdropFilter: 'blur(20px)',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
-            overflow: 'hidden'
+          width: '100%',
+          maxWidth: '800px',
+          overflow: 'hidden',
+          background: 'var(--bg-surface-hover)'
         }}
       >
-        <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 20px',
-            background: 'rgba(0,0,0,0.4)',
-            borderBottom: '1px solid var(--glass-border)',
-            fontFamily: 'monospace'
-        }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
-                <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ef4444' }} />
-                <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#eab308' }} />
-                <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#22c55e' }} />
-            </div>
-            <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '8px', 
-                fontSize: '12px', 
-                color: 'var(--accent-cyan)',
-                background: 'var(--accent-cyan-glow)',
-                padding: '4px 12px',
-                borderRadius: '999px',
-                fontWeight: 600
-            }}>
-                <Code2 size={14} />
-                DETECTED: {detectedLang.toUpperCase()}
-            </div>
+        <div className="flex justify-between items-center" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
+          <div className="flex items-center gap-2">
+            <Code2 size={16} className="text-tertiary" />
+            <span className="mono text-secondary">target.src</span>
+          </div>
+          <div className="badge badge-neutral">
+            {detectedLang}
+          </div>
         </div>
+        
         <textarea
           value={code}
           onChange={(e) => setCode(e.target.value)}
+          spellCheck={false}
           style={{
             width: '100%',
-            height: '300px',
+            height: '320px',
             background: 'transparent',
             border: 'none',
-            padding: '24px',
-            color: '#e4e4e7',
-            fontFamily: '"Fira Code", monospace',
-            fontSize: '15px',
+            color: 'var(--text-primary)',
+            padding: '16px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '14px',
+            lineHeight: 1.6,
             resize: 'none',
-            outline: 'none',
-            lineHeight: 1.6
+            outline: 'none'
           }}
-          spellCheck={false}
         />
-        <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'flex-end' }}>
+
+        {/* Configuration Panel */}
+        <div style={{ 
+          padding: '16px 20px', 
+          background: 'var(--bg-surface)', 
+          borderTop: '1px solid var(--border-subtle)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <div className="flex items-center gap-2 text-secondary text-sm font-medium">
+            <Settings2 size={16} /> Campaign Configuration
+          </div>
+          
+          <div className="flex items-center gap-6">
+            <div className="flex-col gap-1 flex-1">
+              <div className="flex justify-between text-xs text-tertiary mb-1">
+                <span>Input Volume</span>
+                <span className="mono">{maxInputs} / 250</span>
+              </div>
+              <input 
+                type="range" 
+                min="25" 
+                max="250" 
+                value={maxInputs} 
+                onChange={handleInputLimitChange}
+                style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--text-primary)' }}
+              />
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <input 
+                type="number"
+                value={maxInputs}
+                onChange={handleInputLimitChange}
+                onBlur={enforceBounds}
+                min="25"
+                max="250"
+                className="mono"
+                style={{
+                  width: '70px',
+                  background: 'var(--bg-app)',
+                  border: '1px solid var(--border-strong)',
+                  color: 'var(--text-primary)',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  textAlign: 'right'
+                }}
+              />
+              <span className="text-xs text-tertiary">inputs</span>
+            </div>
+
+            <div style={{ height: '32px', width: '1px', background: 'var(--border-subtle)' }} />
+
+            <div className="flex-col gap-1 min-w-[120px]">
+              <div className="text-xs text-tertiary">Est. Duration</div>
+              <div className="text-sm mono text-secondary">~{estimatedSeconds}s</div>
+            </div>
+
+            <div className="flex-1" />
+
             <button
-              onClick={() => onStart(code)}
+              onClick={() => onStart(code, maxInputs)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                background: 'linear-gradient(135deg, var(--accent-cyan), #3b82f6)',
-                color: '#fff',
+                background: 'var(--text-primary)',
+                color: 'var(--bg-app)',
                 border: 'none',
-                padding: '14px 32px',
+                padding: '8px 24px',
                 borderRadius: 'var(--radius-sm)',
-                fontSize: '1.1rem',
-                fontWeight: 600,
+                fontSize: '0.875rem',
+                fontWeight: 500,
                 cursor: 'pointer',
-                boxShadow: '0 4px 15px rgba(6, 182, 212, 0.4)',
-                transition: 'all 0.2s ease'
+                transition: 'transform 0.1s ease'
               }}
-              onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-              onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
+              onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.97)'}
+              onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
             >
-              <Play size={20} />
-              INITIATE FUZZING SEQUENCE
+              <Play size={14} fill="currentColor" />
+              Initialize Engine
             </button>
+          </div>
         </div>
       </motion.div>
     </div>

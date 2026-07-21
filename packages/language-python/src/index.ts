@@ -246,6 +246,54 @@ export class PythonAdapter implements LanguageAdapter {
             });
           }
         }
+        
+        // Boundary Extraction
+        if (node.test._type === 'Compare' && node.test.ops && node.test.ops.length > 0) {
+          const opType = node.test.ops[0]._type;
+          if (['Lt', 'LtE', 'Gt', 'GtE', 'Eq', 'NotEq'].includes(opType)) {
+            let paramName = null;
+            let boundaryValue = null;
+            
+            if (node.test.left._type === 'Name' && node.test.comparators[0]._type === 'Constant') {
+              paramName = node.test.left.id;
+              boundaryValue = node.test.comparators[0].value;
+            } else if (node.test.left._type === 'Constant' && node.test.comparators[0]._type === 'Name') {
+              paramName = node.test.comparators[0].id;
+              boundaryValue = node.test.left.value;
+            }
+
+            if (paramName && typeof boundaryValue === 'number') {
+              nodes.push({
+                id: `bound_${paramName}_${boundaryValue}_${Math.random().toString(36).substring(7)}`,
+                parameterName: paramName,
+                constraintType: 'interval',
+                value: boundaryValue,
+                evidence: `Boundary test found in AST`
+              });
+            }
+          }
+        }
+      }
+
+      // Explicit Raise Extraction
+      if (node._type === 'Raise') {
+          if (node.exc && node.exc.func && node.exc.func.id) { // raise ValueError("...")
+              nodes.push({
+                  id: `raise_${node.exc.func.id}_${Math.random().toString(36).substring(7)}`,
+                  parameterName: 'global',
+                  constraintType: 'explicit_raise',
+                  value: node.exc.func.id,
+                  evidence: `Explicit raise ${node.exc.func.id}`
+              });
+          } else if (node.exc && node.exc.id) { // raise ValueError
+              nodes.push({
+                  id: `raise_${node.exc.id}_${Math.random().toString(36).substring(7)}`,
+                  parameterName: 'global',
+                  constraintType: 'explicit_raise',
+                  value: node.exc.id,
+                  evidence: `Explicit raise ${node.exc.id}`
+              });
+          }
       }
 
       for (const key of Object.keys(node)) {
@@ -277,51 +325,70 @@ export class PythonAdapter implements LanguageAdapter {
       paramConstraints.get(node.parameterName)!.push(node);
     }
 
-    if (target.astNode && target.astNode.args && target.astNode.args.args) {
-      target.astNode.args.args.forEach((arg: any) => {
-        const paramName = arg.arg;
-        const pConstraints = paramConstraints.get(paramName) || [];
-        
-        let synthesizedValue: any = 0; // default int
+    const args = target.astNode && target.astNode.args && target.astNode.args.args ? target.astNode.args.args : [];
 
-        pConstraints.forEach(c => {
-           if (c.constraintType === 'type') {
-               if (c.value === 'dict') synthesizedValue = {};
-               else if (c.value === 'list') synthesizedValue = [];
-               else if (c.value === 'str') synthesizedValue = "fuzz";
-               else if (c.value === 'int') synthesizedValue = 42;
-               else if (c.value === 'float') synthesizedValue = 3.14;
-           }
-           if (c.constraintType === 'required_keys') {
-               if (typeof synthesizedValue !== 'object') synthesizedValue = {};
-               c.value.forEach((k: string) => { synthesizedValue[k] = "fuzz"; });
-           }
-        });
-        
-        baseInput[paramName] = synthesizedValue;
+    args.forEach((arg: any) => {
+      const paramName = arg.arg;
+      const pConstraints = paramConstraints.get(paramName) || [];
+      
+      let synthesizedValue: any = 0; // default int
+
+      pConstraints.forEach(c => {
+         if (c.constraintType === 'type') {
+             if (c.value === 'dict') synthesizedValue = {};
+             else if (c.value === 'list') synthesizedValue = [];
+             else if (c.value === 'str') synthesizedValue = "fuzz";
+             else if (c.value === 'int') synthesizedValue = 42;
+             else if (c.value === 'float') synthesizedValue = 3.14;
+         }
+         if (c.constraintType === 'required_keys') {
+             if (typeof synthesizedValue !== 'object') synthesizedValue = {};
+             c.value.forEach((k: string) => { synthesizedValue[k] = "fuzz"; });
+         }
       });
-    }
+      
+      baseInput[paramName] = synthesizedValue;
+    });
 
     // Seed 1: The fully constrained valid input
-    seeds.push({ id: 'seed_valid_01', input: { value: baseInput }, source: 'SYNTHESIZED' });
+    seeds.push({ id: 'seed_valid_01', input: { value: baseInput }, source: 'SYNTHESIZED', discoveryStrategy: 'Constraint Solver' });
     
-    // Seed 2: Empty dict (often causes KeyError / validation crash)
+    // Seed 2: Empty collections (often causes KeyError / validation crash)
     const emptyInput: any = {};
-    if (target.astNode && target.astNode.args && target.astNode.args.args) {
-        target.astNode.args.args.forEach((arg: any) => { emptyInput[arg.arg] = {}; });
-    }
-    seeds.push({ id: 'seed_empty_01', input: { value: emptyInput }, source: 'SYNTHESIZED' });
+    args.forEach((arg: any) => { emptyInput[arg.arg] = {}; });
+    seeds.push({ id: 'seed_empty_01', input: { value: emptyInput }, source: 'SYNTHESIZED', discoveryStrategy: 'Dictionary Synthesis' });
 
     // Seed 3: Wrong types (e.g. passing strings where dict expected)
     const badInput: any = {};
-    if (target.astNode && target.astNode.args && target.astNode.args.args) {
-        target.astNode.args.args.forEach((arg: any) => { badInput[arg.arg] = "invalid_string_type"; });
+    args.forEach((arg: any) => { badInput[arg.arg] = "invalid_string_type"; });
+    seeds.push({ id: 'seed_bad_type_01', input: { value: badInput }, source: 'SYNTHESIZED', discoveryStrategy: 'Type Mutation' });
+
+    // Seed 4: Complex Iterables for lists
+    const listInput: any = {};
+    args.forEach((arg: any) => { listInput[arg.arg] = [[], [1], ["a", "b"], [{"nested": "dict"}]]; });
+    seeds.push({ id: 'seed_complex_list_01', input: { value: listInput }, source: 'SYNTHESIZED', discoveryStrategy: 'Type Mutation' });
+
+    // Synthesize Boundaries
+    for (const node of constraints.nodes) {
+        if (node.constraintType === 'interval' && typeof node.value === 'number') {
+            const val = node.value;
+            // Generate -1, 0, 1 around the boundary, plus the boundary itself
+            [val - 1, val, val + 1, 0, -1, 99, 100, 101].forEach((boundaryVal, i) => {
+                const bInput = JSON.parse(JSON.stringify(baseInput));
+                bInput[node.parameterName] = boundaryVal;
+                seeds.push({
+                    id: `seed_boundary_${node.parameterName}_${i}`,
+                    input: { value: bInput },
+                    source: 'SYNTHESIZED',
+                    discoveryStrategy: 'Boundary Mutation'
+                });
+            });
+        }
     }
-    seeds.push({ id: 'seed_bad_type_01', input: { value: badInput }, source: 'SYNTHESIZED' });
 
     // Ensure we have at least something to fuzz
     if (seeds.length === 0) {
-        seeds.push({ id: 'fallback', input: { value: { a: 1 } }, source: 'SYNTHESIZED' });
+        seeds.push({ id: 'fallback', input: { value: { a: 1 } }, source: 'SYNTHESIZED', discoveryStrategy: 'Default Generation' });
     }
     
     return { seeds };

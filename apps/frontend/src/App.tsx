@@ -5,6 +5,7 @@ import { Landing } from './components/Landing';
 import { Analysis } from './components/Analysis';
 import { LiveDashboard } from './components/LiveDashboard';
 import { FinalReport } from './components/FinalReport';
+import { MouseGlow } from './components/MouseGlow';
 import './index.css';
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
   
   const [startTime, setStartTime] = useState<number>(0);
   const [durationMs, setDurationMs] = useState<number>(0);
+  const [liveFeedEvents, setLiveFeedEvents] = useState<any[]>([]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -49,60 +51,83 @@ export default function App() {
           const data = JSON.parse(event.data);
           if (data.type === 'BATCH') {
             const newEvents: FuzzEvent[] = data.events;
-            setEvents(prev => [...prev, ...newEvents]); // For Analysis step dependency
+            setEvents(prev => [...prev, ...newEvents]);
 
             newEvents.forEach(e => {
               const p = e.payload;
               
               if (p.type === 'CAMPAIGN_STARTED') {
                 setDetectedLanguage(p.configuration?.target || 'unknown');
+                addTimelineEvent(`Language detected`);
               }
               else if (p.type === 'TARGET_DISCOVERED') {
                 setTargetName(p.targetId);
                 setStats(s => ({ ...s, targets: s.targets + 1 }));
-                addTimelineEvent(`Discovered target: ${p.targetId}`, true);
-              } 
-              else if (p.type === 'SEED_EXECUTED') {
-                setSeedSamples(prev => [...prev, p].slice(-50)); // keep last 50
+                addTimelineEvent(`Target discovered`);
+              }
+              else if (p.type === 'SEEDS_GENERATED') {
+                setSeedSamples(p.seeds?.slice(0, 5) || []);
+                addTimelineEvent(`Interesting seed synthesized`);
+              }
+              else if (p.type === 'CAMPAIGN_PROGRESS') {
+                setStats(prev => {
+                  const now = Date.now();
+                  const dt = (now - lastTime) / 1000;
+                  const deltaExec = p.executed - lastExecuted;
+                  const currentRate = dt > 0 ? Math.floor(deltaExec / dt) : 0;
+                  
+                  if (dt > 1) { 
+                    setChartData(cd => [...cd, { time: getTimelineTime(), rate: currentRate }].slice(-30));
+                    lastTime = now;
+                    lastExecuted = p.executed;
+                  }
+
+                  return {
+                    ...prev,
+                    executed: p.executed,
+                    rate: currentRate > 0 ? currentRate : prev.rate
+                  };
+                });
+                if (p.durationMs) setDurationMs(p.durationMs);
               }
               else if (p.type === 'NEW_FINDING') {
                 setStats(s => ({ ...s, findings: s.findings + 1 }));
                 const finding: FuzzFinding = {
-                  id: p.findingId,
+                  id: p.findingId || Math.random().toString(),
                   type: p.fingerprint?.exceptionType || 'Unknown Exception',
                   location: p.fingerprint?.rootSourceLocation || 'unknown',
-                  outcome: p.outcome,
-                  reproducible: true,
-                  message: 'Execution crashed during validation bounds testing.'
+                  outcome: p.outcome || 'ERROR',
+                  reproducible: p.isReproducible ?? true,
+                  message: p.fingerprint?.normalizedMessage || 'Execution crashed during bounds testing.',
+                  inputData: p.inputData,
+                  discoveryStrategy: p.discoveryStrategy || 'Mutation Strategy',
+                  trace: p.fingerprint?.trace || []
                 };
                 setFindings(prev => [finding, ...prev]);
-                addTimelineEvent(`New Finding: ${finding.type} at ${finding.location}`, true);
+                addTimelineEvent(`Unexpected exception discovered: ${finding.type}`, true);
               }
-              else if (p.type === 'CAMPAIGN_PROGRESS') {
-                const now = Date.now();
-                const deltaT = (now - lastTime) / 1000;
-                const deltaE = p.executed - lastExecuted;
-                const rate = deltaT > 0 ? Math.round(deltaE / deltaT) : 0;
+              else if (p.type === 'EXECUTION_COMPLETED') {
+                if (p.outcome === 'SUCCESS') setStats(s => ({ ...s, rate: s.rate })); // minimal op
+                else if (p.outcome === 'EXPECTED_REJECTION') setStats(s => ({ ...s, expectedRejections: s.expectedRejections + 1 }));
+                else if (p.outcome === 'UNEXPECTED_EXCEPTION') setStats(s => ({ ...s, unexpectedExceptions: s.unexpectedExceptions + 1 }));
                 
-                setStats(s => ({ ...s, executed: p.executed, rate: rate > 0 ? rate : s.rate }));
-                
-                if (rate > 0) {
-                  setChartData(prev => [...prev, { time: getTimelineTime(), rate }].slice(-30)); // keep last 30 ticks
-                }
-
-                lastExecuted = p.executed;
-                lastTime = now;
-                setDurationMs(p.durationMs);
-
-                // Add to timeline periodically rather than every single event
-                if (p.executed % 100 === 0 && p.executed > 0) {
-                  addTimelineEvent(`Progress: ${p.executed.toLocaleString()} executions completed`);
-                }
+                setLiveFeedEvents(prev => [{ id: Math.random().toString(), ...p }, ...prev].slice(0, 50));
+              }
+              else if (p.type === 'NEW_PATH_DISCOVERED') {
+                addTimelineEvent(`New execution path discovered`, true);
+                setLiveFeedEvents(prev => [{ id: Math.random().toString(), ...p }, ...prev].slice(0, 50));
+              }
+              else if (p.type === 'CAMPAIGN_COMPLETED') {
+                addTimelineEvent('Campaign completed successfully');
+                setDurationMs(p.durationMs || 0);
+              }
+              else if (p.type === 'CAMPAIGN_ERROR') {
+                addTimelineEvent(`ERROR: ${p.error}`, true);
               }
             });
           }
         } catch (err) {
-          console.error("Parse error", err);
+          console.error("SSE Parse error", err);
         }
       };
 
@@ -117,12 +142,13 @@ export default function App() {
     }
   }, [appState]);
 
-  const handleFuzz = async (code: string) => {
+  const handleFuzz = async (code: string, maxInputs: number) => {
     // Reset state
     setAppState('ANALYSIS');
     setTimeline([]);
     setFindings([]);
     setSeedSamples([]);
+    setLiveFeedEvents([]);
     setStats({ executed: 0, rate: 0, findings: 0, targets: 0, expectedRejections: 0, unexpectedExceptions: 0, timeouts: 0 });
     setChartData([]);
     setStartTime(Date.now());
@@ -133,9 +159,9 @@ export default function App() {
       await fetch('http://localhost:3001/api/fuzz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code })
+        body: JSON.stringify({ code, maxInputs })
       });
-      addTimelineEvent('Started fuzzing campaign', true);
+      // Removed generic addTimelineEvent
     } catch (err) {
       console.error("Failed to start", err);
       setAppState('LANDING'); // rollback on err
@@ -144,6 +170,7 @@ export default function App() {
 
   return (
     <>
+      <MouseGlow />
       <AnimatePresence mode="wait">
         {appState === 'LANDING' && (
           <Landing key="landing" onStart={handleFuzz} />
@@ -162,8 +189,8 @@ export default function App() {
             findings={findings}
             startTime={startTime}
             timeline={timeline}
+            liveFeedEvents={liveFeedEvents}
             onStop={() => setAppState('COMPLETE')}
-            seedSamples={seedSamples}
             detectedLanguage={detectedLanguage}
           />
         )}

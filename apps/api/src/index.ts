@@ -44,7 +44,7 @@ app.get('/api/stream', (req, res) => {
 });
 
 app.post('/api/fuzz', (req, res) => {
-  const { code } = req.body;
+  const { code, maxInputs } = req.body;
   if (!code) {
     return res.status(400).json({ error: 'Code is required' });
   }
@@ -52,9 +52,11 @@ app.post('/api/fuzz', (req, res) => {
   // Force allow unsafe local execution for the test environment
   process.env.OMEGA_ALLOW_UNSAFE_LOCAL_EXECUTION = 'true';
 
+  const limit = typeof maxInputs === 'number' ? Math.max(25, Math.min(250, maxInputs)) : 150;
+
   // Trigger the orchestrator
   import('@omega-fuzz/orchestrator').then(({ startCampaign }) => {
-    startCampaign(code, campaignEvents).catch(console.error);
+    startCampaign(code, campaignEvents, limit).catch(console.error);
   });
 
   res.json({ message: 'Campaign started' });

@@ -217,7 +217,9 @@ export type EventPayload =
   | { type: 'TARGET_DISCOVERED', targetId: string, signature: string }
   | { type: 'NEW_FINDING', findingId: string, fingerprint: FindingFingerprint, outcome: TerminalOutcome }
   | { type: 'CAMPAIGN_PROGRESS', executed: number, durationMs: number }
-  | { type: 'CAMPAIGN_COMPLETED', summary: any };
+  | { type: 'CAMPAIGN_COMPLETED', summary: any }
+  | { type: 'EXECUTION_COMPLETED', inputId: string, inputData: any, outcome: TerminalOutcome }
+  | { type: 'NEW_PATH_DISCOVERED', blockId: string, description: string };
 
 export interface CampaignEvent {
   schemaVersion: '1.0.0';

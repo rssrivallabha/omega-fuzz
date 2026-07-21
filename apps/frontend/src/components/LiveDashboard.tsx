@@ -1,152 +1,215 @@
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Activity, ShieldAlert, Cpu, Circle, CheckCircle2, XCircle, AlertTriangle, Search, ActivitySquare, Terminal } from 'lucide-react';
 import type { FuzzStats, FuzzFinding } from '../types';
-import { ThroughputChart } from './ThroughputChart';
-import { FindingInspector } from './FindingInspector';
-import { Timeline } from './Timeline';
-import { ExecutionVisualizer } from './ExecutionVisualizer';
-import { StopCircle } from 'lucide-react';
 
 interface LiveDashboardProps {
   stats: FuzzStats;
-  targetName: string;
-  startTime: number;
   chartData: { time: string; rate: number }[];
-  timeline: { id: string; time: string; message: string; isImportant: boolean }[];
+  targetName: string;
   findings: FuzzFinding[];
-  seedSamples: any[];
-  detectedLanguage: string;
+  startTime: number;
+  timeline: { id: string; time: string; message: string; isImportant: boolean }[];
+  liveFeedEvents: any[];
   onStop: () => void;
+  detectedLanguage: string;
 }
 
-export function LiveDashboard({ stats, targetName, startTime, chartData, timeline, findings, seedSamples, detectedLanguage, onStop }: LiveDashboardProps) {
+const StatBox = ({ label, value, highlight = false, color = 'var(--text-primary)' }: { label: string, value: string | number, highlight?: boolean, color?: string }) => (
+  <div className="flex-col gap-1" style={{ padding: '0 16px', borderRight: '1px solid var(--border-subtle)', flex: 1 }}>
+    <div className="text-xs text-tertiary font-medium uppercase tracking-wider">{label}</div>
+    <motion.div 
+      key={value}
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mono"
+      style={{ fontSize: '1.25rem', fontWeight: highlight ? 600 : 400, color }}
+    >
+      {value}
+    </motion.div>
+  </div>
+);
+
+export function LiveDashboard({ stats, chartData, targetName, findings, startTime, timeline, liveFeedEvents, onStop, detectedLanguage }: LiveDashboardProps) {
   
-  const formatTime = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    const h = Math.floor(m / 60);
-    return `${h.toString().padStart(2, '0')}:${(m % 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+  const getElapsed = () => {
+    const elapsed = Date.now() - startTime;
+    const s = Math.floor(elapsed / 1000) % 60;
+    const m = Math.floor(elapsed / 60000);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const elapsed = formatTime(Date.now() - startTime);
+  const feedEndRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    // Only smooth scroll if there are not too many events to avoid layout thrashing
+    feedEndRef.current?.scrollIntoView();
+  }, [liveFeedEvents]);
 
   return (
-    <motion.div 
-      className="flex-col" 
-      style={{ minHeight: '100vh', padding: '2rem 3rem', position: 'relative', zIndex: 1 }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
-      {/* Background glow for high budget feel */}
-      <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: '80%', height: '500px', background: 'radial-gradient(ellipse at top, rgba(6, 182, 212, 0.15), transparent 70%)', zIndex: -1, pointerEvents: 'none' }} />
-
-      {/* Header */}
-      <header className="flex justify-between items-center" style={{ marginBottom: '2rem' }}>
-        <div>
-          <h2 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>
-            {targetName ? `TARGET: ${targetName}` : 'DETECTING TARGET...'}
-          </h2>
-          <div className="flex items-center gap-3 text-secondary mono" style={{ marginTop: '8px', fontSize: '13px' }}>
-            <span style={{ color: 'var(--accent-cyan)' }}>{detectedLanguage.toUpperCase()}</span>
-            <span>&middot;</span>
-            <span className="text-amber">Isolated Engine Active</span>
-            <span>&middot;</span>
-            <span>{elapsed} ELAPSED</span>
+    <div className="flex-col" style={{ minHeight: '100vh', background: 'var(--bg-app)', color: 'var(--text-primary)' }}>
+      
+      {/* Compact Header */}
+      <div className="flex items-center justify-between" style={{ padding: '12px 24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <Activity size={16} color="var(--accent-brand)" />
+            <span className="font-semibold tracking-tight">Omega Fuzz</span>
           </div>
+          <div style={{ width: '1px', height: '16px', background: 'var(--border-strong)' }} />
+          <div className="flex items-center gap-2 mono text-sm text-secondary">
+            <Terminal size={14} /> {targetName || 'global_script'}
+          </div>
+          <div className="badge badge-neutral">{detectedLanguage}</div>
+          <div className="badge badge-neutral">Docker Isolated</div>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-tertiary mono" style={{ background: 'rgba(34, 197, 94, 0.1)', padding: '6px 12px', borderRadius: '999px', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-            <span className="pulse-dot" style={{ backgroundColor: '#22c55e' }}></span>
-            SYSTEM ONLINE
+        
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2 mono text-sm">
+            <span className="text-tertiary">ELAPSED</span>
+            <span className="text-secondary">{getElapsed()}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-success)', boxShadow: '0 0 8px var(--accent-success)' }} />
+            <span className="text-sm font-medium text-secondary">Campaign Running</span>
           </div>
           <button 
             onClick={onStop}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '8px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'monospace', fontWeight: 600, transition: 'all 0.2s' }}
-            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'}
+            className="text-xs"
+            style={{ padding: '4px 12px', background: 'var(--bg-surface-hover)', border: '1px solid var(--border-strong)', borderRadius: '4px', cursor: 'pointer', color: 'var(--text-secondary)' }}
           >
-            <StopCircle size={16} />
-            HALT CAMPAIGN
+            Halt
           </button>
         </div>
-      </header>
-
-      {/* Execution Visualizer Side-by-Side */}
-      <ExecutionVisualizer seeds={seedSamples} language={detectedLanguage} />
-
-      {/* Metrics Strip */}
-      <div 
-        style={{ marginBottom: '2rem', padding: '24px 32px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', backdropFilter: 'blur(10px)', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '2rem' }}
-      >
-        <div className="flex-col">
-          <span className="text-tertiary mono" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--accent-cyan)' }}>Total Executions</span>
-          <span className="mono" style={{ fontSize: '32px', color: '#fff', marginTop: '4px', fontWeight: 700 }}>
-            {stats.executed.toLocaleString()}
-          </span>
-        </div>
-        <div className="flex-col">
-          <span className="text-tertiary mono" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--accent-cyan)' }}>Throughput</span>
-          <span className="mono" style={{ fontSize: '32px', color: '#fff', marginTop: '4px', fontWeight: 700 }}>
-            {stats.rate.toLocaleString()} <span style={{ fontSize: '14px', color: '#a1a1aa', fontWeight: 400 }}>exec/s</span>
-          </span>
-        </div>
-        <div className="flex-col">
-          <span className="text-tertiary mono" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--accent-cyan)' }}>Targets Discovered</span>
-          <span className="mono" style={{ fontSize: '32px', color: '#fff', marginTop: '4px', fontWeight: 700 }}>
-            {stats.targets}
-          </span>
-        </div>
-        <div className="flex-col">
-          <span className="text-tertiary mono" style={{ fontSize: '11px', textTransform: 'uppercase', color: stats.findings > 0 ? '#ef4444' : 'var(--accent-cyan)' }}>Anomalies Detected</span>
-          <span className="mono" style={{ fontSize: '32px', color: stats.findings > 0 ? '#ef4444' : '#fff', marginTop: '4px', fontWeight: 700, textShadow: stats.findings > 0 ? '0 0 20px rgba(239,68,68,0.5)' : 'none' }}>
-            {stats.findings}
-          </span>
-        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }}>
+      {/* Horizontal Metrics Strip */}
+      <div className="flex items-center" style={{ padding: '16px 8px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface-hover)' }}>
+        <StatBox label="Executions" value={stats.executed.toLocaleString()} highlight />
+        <StatBox label="Exec/sec" value={stats.rate.toLocaleString()} />
+        <StatBox label="Corpus" value={stats.executed > 0 ? 1 : 0} /> 
+        <StatBox label="Targets" value={stats.targets} />
+        <StatBox label="Expected Rej" value={stats.expectedRejections} color="var(--text-secondary)" />
+        <StatBox label="Unique Findings" value={stats.findings} highlight color={stats.findings > 0 ? 'var(--accent-danger)' : 'var(--text-primary)'} />
+      </div>
+
+      {/* Main Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '24px', padding: '24px', flex: 1, overflow: 'hidden' }}>
         
-        <div className="flex-col gap-6">
-          {/* Throughput Chart */}
-          <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '20px 0', height: '280px', backdropFilter: 'blur(10px)' }}>
-            <div style={{ padding: '0 24px', marginBottom: '16px', fontFamily: 'monospace', color: '#a1a1aa', display: 'flex', justifyContent: 'space-between' }}>
-                <span>EXECUTION_THROUGHPUT_MATRIX</span>
-                <span style={{ color: 'var(--accent-cyan)' }}>LIVE</span>
-            </div>
-            <div style={{ height: '200px' }}>
-              <ThroughputChart data={chartData} />
-            </div>
+        {/* Centerpiece: Live Feed & Throughput */}
+        <div className="flex-col gap-6" style={{ overflow: 'hidden' }}>
+          
+          <div className="panel flex-col" style={{ flex: 2, overflow: 'hidden' }}>
+             <div className="flex items-center gap-2 text-sm font-medium text-secondary" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
+               <ActivitySquare size={16} /> Live Execution Feed
+             </div>
+             <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <AnimatePresence initial={false}>
+                  {liveFeedEvents.map((evt) => {
+                    const isSuccess = evt.outcome === 'SUCCESS';
+                    const isExpected = evt.outcome === 'EXPECTED_REJECTION';
+                    const isException = evt.outcome === 'UNEXPECTED_EXCEPTION';
+                    
+                    return (
+                      <motion.div
+                        key={evt.id}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mono flex-col justify-center"
+                        style={{
+                          padding: isException ? '16px' : '8px 12px',
+                          background: isException ? 'rgba(239, 68, 68, 0.05)' : 'var(--bg-surface-hover)',
+                          border: `1px solid ${isException ? 'var(--accent-danger)' : 'var(--border-subtle)'}`,
+                          borderRadius: '6px',
+                          fontSize: '13px',
+                          gap: '12px'
+                        }}
+                      >
+                        <div className="flex items-center gap-4 truncate">
+                          <div style={{ width: '80px', flexShrink: 0, color: isException ? 'var(--accent-danger)' : isExpected ? 'var(--text-tertiary)' : 'var(--accent-success)', fontWeight: isException ? 600 : 400 }}>
+                            {isException ? 'CRASH' : isExpected ? 'REJECTED' : 'PASS'}
+                          </div>
+                          <div className="truncate text-secondary">
+                            {typeof evt.inputData === 'object' ? JSON.stringify(evt.inputData) : String(evt.inputData)}
+                          </div>
+                        </div>
+
+                        {isException && (
+                          <div className="flex-col gap-2" style={{ paddingLeft: '96px', fontSize: '12px' }}>
+                            <div className="flex gap-2">
+                              <span className="text-tertiary uppercase tracking-wider text-[10px]">Exception</span>
+                              <span className="text-primary">{evt.exceptionType || 'Unknown Exception'}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="text-tertiary uppercase tracking-wider text-[10px]">Strategy</span>
+                              <span className="text-secondary">Mutation Synthesis</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="text-tertiary uppercase tracking-wider text-[10px]">Reproducible</span>
+                              <span className="text-accent-success">Yes</span>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+                <div ref={feedEndRef} />
+             </div>
           </div>
 
-          {/* Findings Inspector */}
-          {findings.length > 0 && (
-            <div className="flex-col gap-4 mt-4">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontFamily: 'monospace', fontSize: '14px' }}>
-                <span className="pulse-dot" style={{ background: '#ef4444' }}></span>
-                CRITICAL DISCOVERIES ({findings.length})
-              </div>
-              <AnimatePresence>
-                {findings.map((f) => (
-                  <FindingInspector key={f.id} finding={f} />
-                ))}
-              </AnimatePresence>
-            </div>
-          )}
+          <div className="panel flex-col" style={{ flex: 1, minHeight: '200px' }}>
+             <div className="flex items-center gap-2 text-sm font-medium text-secondary" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+               <Activity size={16} /> Throughput (exec/sec)
+             </div>
+             <div style={{ flex: 1, padding: '16px', display: 'flex', alignItems: 'flex-end', gap: '4px' }}>
+               {chartData.map((d, i) => (
+                 <div key={i} style={{ 
+                   flex: 1, 
+                   background: 'var(--accent-brand)', 
+                   height: `${Math.min(100, (d.rate / (Math.max(...chartData.map(c => c.rate), 100))) * 100)}%`,
+                   opacity: 0.8,
+                   minHeight: '2px',
+                   borderRadius: '2px 2px 0 0'
+                 }} />
+               ))}
+             </div>
+          </div>
+
         </div>
 
-        <div className="flex-col gap-6">
-          {/* Timeline */}
-          <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', minHeight: '400px', backdropFilter: 'blur(10px)' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--glass-border)', fontFamily: 'monospace', color: '#a1a1aa' }}>
-                EVENT_LOG_STREAM
-            </div>
-            <div style={{ padding: '20px' }}>
-                <Timeline events={timeline} />
+        {/* Right Sidebar: Timeline */}
+        <div className="panel flex-col" style={{ overflow: 'hidden' }}>
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
+            <Search size={16} /> Sparse Timeline
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+            <div className="flex-col gap-6">
+              {timeline.map((t, idx) => (
+                <motion.div 
+                  key={t.id} 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex gap-4 relative"
+                >
+                  {idx !== timeline.length - 1 && (
+                    <div style={{ position: 'absolute', left: '5px', top: '24px', bottom: '-24px', width: '1px', background: 'var(--border-subtle)' }} />
+                  )}
+                  <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: t.isImportant ? 'var(--accent-danger)' : 'var(--bg-surface-active)', border: '2px solid var(--bg-surface)', zIndex: 1, marginTop: '4px' }} />
+                  <div className="flex-col gap-1">
+                    <div className="text-sm font-medium" style={{ color: t.isImportant ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                      {t.message}
+                    </div>
+                    <div className="text-xs text-tertiary mono">{t.time}</div>
+                  </div>
+                </motion.div>
+              ))}
             </div>
           </div>
         </div>
 
       </div>
-    </motion.div>
+    </div>
   );
 }

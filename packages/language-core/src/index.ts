@@ -80,7 +80,7 @@ export interface ConstraintGraph {
 export interface ConstraintNode {
   id: string;
   parameterName: string;
-  constraintType: 'interval' | 'length' | 'regex' | 'type' | 'literal' | 'collection_size' | 'required_keys';
+  constraintType: 'interval' | 'length' | 'regex' | 'type' | 'literal' | 'collection_size' | 'required_keys' | 'explicit_raise';
   value: any;
   evidence: string; // AST source
 }
@@ -99,6 +99,7 @@ export interface Seed {
   id: string;
   input: CanonicalValue;
   source: 'SYNTHESIZED' | 'MUTATED' | 'EXTRACTED';
+  discoveryStrategy?: string;
 }
 
 export interface HarnessConfiguration {

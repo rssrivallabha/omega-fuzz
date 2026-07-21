@@ -26,10 +26,13 @@ export class ExceptionParser {
   }
 }
 
+import { ConstraintGraph } from '@omega-fuzz/language-core';
+
 export class ValidationClassifier {
   classify(
     execution: RawExecutionResult, 
-    analysis: ProgramAnalysis
+    analysis: ProgramAnalysis,
+    constraints?: ConstraintGraph
   ): ValidationClassification {
     const defaultResult: ValidationClassification = {
       classification: 'INCONCLUSIVE',
@@ -55,6 +58,23 @@ export class ValidationClassifier {
     
     if (!exception) {
       return defaultResult;
+    }
+
+    // Cross-reference with AST explicit raises
+    const isExplicitlyRaised = constraints?.nodes.some(n => 
+        n.constraintType === 'explicit_raise' && n.value === exception.type
+    );
+
+    if (isExplicitlyRaised) {
+        return {
+            classification: 'EXPECTED_REJECTION',
+            confidence: 100,
+            reason: `Explicitly coded validation exception (${exception.type}) detected via AST`,
+            evidence: [{
+                type: 'EXPLICIT_RAISE',
+                description: `Exception ${exception.type} is explicitly raised in the source code.`
+            }]
+        };
     }
 
     // Heuristics for EXPECTED_REJECTION

@@ -21,6 +21,8 @@ export interface FuzzFinding {
   outcome: string; // e.g. "UNEXPECTED_EXCEPTION"
   reproducible: boolean;
   message?: string;
+  inputData?: any;
+  discoveryStrategy?: string;
   trace?: string[];
 }
 

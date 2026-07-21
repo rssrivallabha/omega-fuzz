@@ -13,7 +13,7 @@ interface TimelineProps {
 
 export function Timeline({ events }: TimelineProps) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div className="flex-col gap-2">
       <AnimatePresence initial={false}>
         {events.map((ev) => (
           <motion.div
@@ -23,14 +23,15 @@ export function Timeline({ events }: TimelineProps) {
             className="flex items-center gap-4"
             style={{ 
               padding: '8px 0',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
+              borderBottom: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ minWidth: '70px', fontSize: '12px', fontFamily: 'monospace', color: '#71717a' }}>
+            <div className="mono text-tertiary" style={{ minWidth: '70px', fontSize: '12px' }}>
               {ev.time}
             </div>
             <div 
-              style={{ fontSize: '13px', fontFamily: 'monospace', color: ev.isImportant ? '#fff' : '#a1a1aa' }}
+              className="mono"
+              style={{ fontSize: '13px', color: ev.isImportant ? 'var(--text-primary)' : 'var(--text-secondary)' }}
             >
               {ev.message}
             </div>

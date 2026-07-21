@@ -12,7 +12,7 @@ import { CppAdapter } from '@omega-fuzz/language-cpp';
 import { SqlAdapter } from '@omega-fuzz/language-sql';
 import { SwiftAdapter } from '@omega-fuzz/language-swift';
 
-export async function startCampaign(sourceCode: string, eventEmitter: EventEmitter): Promise<CanonicalReport> {
+export async function startCampaign(sourceCode: string, eventEmitter: EventEmitter, maxInputs: number = 200): Promise<CanonicalReport> {
   const campaignId = uuidv4();
   
   const pyAdapter = new PythonAdapter();
@@ -61,141 +61,171 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
   const targets = await adapter.discoverTargets(sourceCode, parsed);
   
   if (targets.length === 0) {
-      // Just fuzz it directly as a script if no explicit target functions
       targets.push({ id: 'global_script', name: 'global', startLine: 1, endLine: sourceCode.split('\n').length } as any);
   }
 
-  const target = targets[0];
-  (target as any).source = sourceCode;
-  
+  const targetNames = targets.map((t: any) => t.name);
+
   eventEmitter.emit('internal_event', {
       schemaVersion: '1.0.0',
       eventId: uuidv4(),
       timestamp: new Date().toISOString(),
-      payload: { type: 'TARGET_DISCOVERED', targetId: target.name, signature: (target as any).source ? (target as any).source.split('\n')[0] : target.name }
+      payload: { type: 'TARGET_DISCOVERED', targetId: targetNames.join(', '), signature: targetNames.length + ' targets discovered' }
   });
 
-  const constraints = await adapter.extractConstraints(target, {} as any);
-  const seedCorpus = await adapter.synthesizeSeeds(target, constraints);
+  let totalExecuted = 0;
+  let totalUniqueFindings = 0;
+  const allFindings: any[] = [];
+  let totalExpectedRejections = 0;
   
-  const harness = await adapter.generateHarness(target, { timeoutMs: 1000 } as any);
-
-  // Secure Execution Backend Enforcement
-  let sandboxBackend;
-  const allowUnsafe = process.env.OMEGA_ALLOW_UNSAFE_LOCAL_EXECUTION === 'true';
-
-  if (!allowUnsafe) {
-      // In a real environment we would instantiate DockerExecutionBackend here.
-      // We will throw an error explicitly if it's not available to satisfy security requirements.
-      // NOTE: DockerExecutionBackend requires a running daemon.
-      throw new Error("SECURE EXECUTION FAILURE: Docker backend is required for safe execution but is currently unavailable or disabled. To test in local process mode, explicitly set OMEGA_ALLOW_UNSAFE_LOCAL_EXECUTION=true.");
-  } else {
-      console.warn("WARNING: Running in OMEGA_ALLOW_UNSAFE_LOCAL_EXECUTION mode. Arbitrary code execution is permitted on the host.");
-      sandboxBackend = new LocalProcessExecutionBackend();
-  }
-  
-  const sandbox = await sandboxBackend.prepare({
-      targetId: target.name,
-      sourceCode: sourceCode,
-      harnessCode: harness.sourceCode,
-      timeoutMs: 1000,
-      memoryLimitMb: 128,
-      language: detectedLanguage
-  } as any);
-
   const deduplication = new DeduplicationEngine() as any;
   const classifier = new ValidationClassifier();
-  
-  let executed = 0;
   let startTime = Date.now();
-  let uniqueFindings = 0;
-  const findings: any[] = [];
 
-  // Simulate a rapid fuzzing loop over the synthesized seeds
-  // To make it look like a real continuous fuzzer, we loop for a few seconds
-  for (let i = 0; i < 200; i++) {
-     // Pick a seed from corpus, or fallback to random if corpus exhausted
-     const seed = seedCorpus.seeds[i % seedCorpus.seeds.length] || { id: 'rand', input: { value: Math.random() } };
-     
-     // Execute
-     const execResult = await sandboxBackend.execute(sandbox, { inputData: JSON.stringify(seed.input.value) + '\n' });
-     
-     if (i === 1) { // Log one of the executions
-         console.log(`[DEBUG] Seed:`, JSON.stringify(seed.input.value));
-         console.log(`[DEBUG] Stdout:`, execResult.stdout);
-         console.log(`[DEBUG] Stderr:`, execResult.stderr);
-     }
+  const inputsPerTarget = Math.floor(maxInputs / targets.length) || 1;
 
-     executed++;
+  for (const target of targets) {
+      (target as any).source = sourceCode;
 
-     // Send a sample of seeds to the frontend (e.g. 5 times per second = every 40 executions if 200 in 1 sec)
-     // For demo purposes, we will just sample every 10 executions to make the stream dense.
-     if (i % 10 === 0) {
-         eventEmitter.emit('internal_event', {
-            schemaVersion: '1.0.0',
-            eventId: uuidv4(),
-            timestamp: new Date().toISOString(),
-            payload: { 
-                type: 'SEED_EXECUTED', 
-                seedId: seed.id, 
-                input: seed.input.value,
-                durationMs: Date.now() - startTime
-            }
-         });
-     }
+      const constraints = await adapter.extractConstraints(target, {} as any);
+      const seedCorpus = await adapter.synthesizeSeeds(target, constraints);
+      
+      eventEmitter.emit('internal_event', {
+          schemaVersion: '1.0.0',
+          eventId: uuidv4(),
+          timestamp: new Date().toISOString(),
+          payload: { type: 'SEEDS_GENERATED', seeds: seedCorpus.seeds }
+      });
 
-     if (i % 25 === 0) {
-         eventEmitter.emit('internal_event', {
-            schemaVersion: '1.0.0',
-            eventId: uuidv4(),
-            timestamp: new Date().toISOString(),
-            payload: { type: 'CAMPAIGN_PROGRESS', executed, durationMs: Date.now() - startTime }
-         });
-     }
+      const harness = await adapter.generateHarness(target, { timeoutMs: 1000 } as any);
 
-     // Always parse crash because python harness might exit 0 but return error json
-     const normalizedCrash = await adapter.parseCrash(execResult);
-     if (normalizedCrash) {
-         const finding = {
-             id: `FND-${uniqueFindings + 1}`,
-             fingerprint: {
-                 outcomeCategory: 'UNEXPECTED_EXCEPTION',
-                 exceptionType: normalizedCrash.exceptionType,
-                 rootSourceLocation: (normalizedCrash.stackTrace as any)?.frames[0] || 'unknown'
-             },
-             isReproducible: true
-         };
-             
+      let sandboxBackend;
+      const allowUnsafe = process.env.OMEGA_ALLOW_UNSAFE_LOCAL_EXECUTION === 'true';
+
+      if (!allowUnsafe) {
+          throw new Error("SECURE EXECUTION FAILURE: Docker backend is required.");
+      } else {
+          sandboxBackend = new LocalProcessExecutionBackend();
+      }
+      
+      const sandbox = await sandboxBackend.prepare({
+          targetId: target.name,
+          sourceCode: sourceCode,
+          harnessCode: harness.sourceCode,
+          timeoutMs: 1000,
+          memoryLimitMb: 128,
+          language: detectedLanguage
+      } as any);
+
+      const streamInterval = Math.max(1, Math.floor(inputsPerTarget / 50)); 
+      
+      for (let i = 0; i < inputsPerTarget; i++) {
+         const seed = seedCorpus.seeds[i % seedCorpus.seeds.length] || { id: 'rand', input: { value: Math.random() }, discoveryStrategy: 'Fallback' };
+         
+         const execResult = await sandboxBackend.execute(sandbox, { inputData: JSON.stringify(seed.input.value) + '\n' });
+         
+         totalExecuted++;
+         const normalizedCrash = await adapter.parseCrash(execResult);
+         
+         // Use the AST-backed classifier
+         const classification = classifier.classify(execResult, {} as any, constraints);
+         let outcome = 'SUCCESS';
+
+         if (classification.classification === 'EXPECTED_REJECTION' || execResult.stdout.includes('ValueError') || execResult.stderr.includes('ValueError')) {
+             outcome = 'EXPECTED_REJECTION';
+             totalExpectedRejections++;
+         } else if (normalizedCrash) {
+             outcome = 'UNEXPECTED_EXCEPTION';
+             const finding = {
+                 id: `FND-${totalUniqueFindings + 1}`,
+                 targetFunction: target.name,
+                 exceptionMessage: normalizedCrash.normalizedMessage,
+                 discoveryStrategy: (seed as any).discoveryStrategy || 'Mutation Strategy',
+                 fingerprint: {
+                     outcomeCategory: 'UNEXPECTED_EXCEPTION',
+                     exceptionType: normalizedCrash.exceptionType,
+                     rootSourceLocation: (normalizedCrash.stackTrace as any)?.frames[0] || 'unknown',
+                     normalizedMessage: normalizedCrash.normalizedMessage
+                 },
+                 isReproducible: true
+             };
+                 
              const fgptStr = JSON.stringify(finding.fingerprint);
              if (!deduplication.fingerprintCache?.has(fgptStr)) {
                  deduplication.fingerprintCache?.add(fgptStr);
-                 uniqueFindings++;
-                 findings.push(finding);
+                 totalUniqueFindings++;
+                 allFindings.push(finding);
                  eventEmitter.emit('internal_event', {
                      schemaVersion: '1.0.0',
                      eventId: uuidv4(),
                      timestamp: new Date().toISOString(),
-                     payload: { type: 'NEW_FINDING', findingId: finding.id, fingerprint: finding.fingerprint, outcome: 'UNEXPECTED_EXCEPTION' }
+                     payload: { 
+                         type: 'NEW_FINDING', 
+                         findingId: finding.id, 
+                         fingerprint: finding.fingerprint, 
+                         outcome: 'UNEXPECTED_EXCEPTION',
+                         inputData: seed.input.value,
+                         discoveryStrategy: finding.discoveryStrategy,
+                         targetFunction: finding.targetFunction,
+                         exceptionMessage: finding.exceptionMessage
+                     }
                  });
+                 
+                 eventEmitter.emit('internal_event', {
+                    schemaVersion: '1.0.0',
+                    eventId: uuidv4(),
+                    timestamp: new Date().toISOString(),
+                    payload: { 
+                        type: 'EXECUTION_COMPLETED', 
+                        inputId: seed.id, 
+                        inputData: seed.input.value,
+                        outcome: 'UNEXPECTED_EXCEPTION',
+                        exceptionType: normalizedCrash.exceptionType
+                    }
+                 });
+             }
          }
-     }
-  }
 
-  await sandboxBackend.destroy(sandbox);
+         if (i % streamInterval === 0 && outcome !== 'UNEXPECTED_EXCEPTION') {
+             eventEmitter.emit('internal_event', {
+                schemaVersion: '1.0.0',
+                eventId: uuidv4(),
+                timestamp: new Date().toISOString(),
+                payload: { 
+                    type: 'EXECUTION_COMPLETED', 
+                    inputId: seed.id, 
+                    inputData: seed.input.value,
+                    outcome: outcome
+                }
+             });
+         }
+
+         if (totalExecuted % 25 === 0) {
+             eventEmitter.emit('internal_event', {
+                schemaVersion: '1.0.0',
+                eventId: uuidv4(),
+                timestamp: new Date().toISOString(),
+                payload: { type: 'CAMPAIGN_PROGRESS', executed: totalExecuted, durationMs: Date.now() - startTime }
+             });
+         }
+      }
+
+      await sandboxBackend.destroy(sandbox);
+  }
 
   eventEmitter.emit('internal_event', {
       schemaVersion: '1.0.0',
       eventId: uuidv4(),
       timestamp: new Date().toISOString(),
-      payload: { type: 'CAMPAIGN_PROGRESS', executed, durationMs: Date.now() - startTime }
+      payload: { type: 'CAMPAIGN_PROGRESS', executed: totalExecuted, durationMs: Date.now() - startTime }
   });
 
   return {
       campaign_id: campaignId,
       generated_at: new Date().toISOString(),
-      target: { language: 'python', runtime: 'python3' },
-      summary: { executed, unique_findings: uniqueFindings, duplicates: deduplication.fingerprintCache?.size || 0, expected_rejections: 0 },
-      findings: findings,
+      target: { language: detectedLanguage, runtime: 'unknown', targets: targetNames },
+      summary: { executed: totalExecuted, unique_findings: totalUniqueFindings, duplicates: deduplication.fingerprintCache?.size || 0, expected_rejections: totalExpectedRejections },
+      findings: allFindings,
       timeline: []
   } as any;
 }
