@@ -155,17 +155,107 @@ export default function App() {
     setChartData([]);
     setStartTime(Date.now());
     
-    setAppState('ANALYSIS');
-    
     try {
       const apiUrl = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/fuzz` : '/api/fuzz';
-      await fetch(apiUrl, {
+      const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },body: JSON.stringify({ code, maxInputs })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, maxInputs })
       });
-      // Removed generic addTimelineEvent
+
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      
+      let lastExecuted = 0;
+      let lastTime = Date.now();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          setAppState('COMPLETE');
+          break;
+        }
+        
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          if (part.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(part.slice(6));
+              if (data.type === 'BATCH') {
+                const newEvents: FuzzEvent[] = data.events;
+                setEvents(prev => [...prev, ...newEvents]);
+    
+                newEvents.forEach(e => {
+                  const p = e.payload;
+                  if (p.type === 'CAMPAIGN_STARTED') {
+                    setDetectedLanguage(p.configuration?.target || 'unknown');
+                    addTimelineEvent(`Language detected`);
+                  } else if (p.type === 'TARGET_DISCOVERED') {
+                    setTargetName(p.targetId);
+                    setStats(s => ({ ...s, targets: s.targets + 1 }));
+                    addTimelineEvent(`Target discovered`);
+                  } else if (p.type === 'SEEDS_GENERATED') {
+                    setSeedSamples(p.seeds?.slice(0, 5) || []);
+                    addTimelineEvent(`Interesting seed synthesized`);
+                  } else if (p.type === 'CAMPAIGN_PROGRESS') {
+                    setStats(prev => {
+                      const now = Date.now();
+                      const dt = (now - lastTime) / 1000;
+                      const deltaExec = p.executed - lastExecuted;
+                      const currentRate = dt > 0 ? Math.floor(deltaExec / dt) : 0;
+                      
+                      if (dt > 1) { 
+                        setChartData(cd => [...cd, { time: getTimelineTime(), rate: currentRate }].slice(-30));
+                        lastTime = now;
+                        lastExecuted = p.executed;
+                      }
+                      return { ...prev, executed: p.executed, rate: currentRate > 0 ? currentRate : prev.rate };
+                    });
+                    if (p.durationMs) setDurationMs(p.durationMs);
+                  } else if (p.type === 'NEW_FINDING') {
+                    setStats(s => ({ ...s, findings: s.findings + 1 }));
+                    const finding: FuzzFinding = {
+                      id: p.findingId || Math.random().toString(),
+                      type: p.fingerprint?.exceptionType || 'Unknown Exception',
+                      location: p.fingerprint?.rootSourceLocation || 'unknown',
+                      outcome: p.outcome || 'ERROR',
+                      reproducible: p.isReproducible ?? true,
+                      message: p.fingerprint?.normalizedMessage || 'Execution crashed during bounds testing.',
+                      inputData: p.inputData,
+                      discoveryStrategy: p.discoveryStrategy || 'Mutation Strategy',
+                      trace: p.fingerprint?.trace || []
+                    };
+                    setFindings(prev => [finding, ...prev]);
+                    addTimelineEvent(`Unexpected exception discovered: ${finding.type}`, true);
+                  } else if (p.type === 'EXECUTION_COMPLETED') {
+                    if (p.outcome === 'SUCCESS') setStats(s => ({ ...s, rate: s.rate }));
+                    else if (p.outcome === 'EXPECTED_REJECTION') setStats(s => ({ ...s, expectedRejections: s.expectedRejections + 1 }));
+                    else if (p.outcome === 'UNEXPECTED_EXCEPTION') setStats(s => ({ ...s, unexpectedExceptions: s.unexpectedExceptions + 1 }));
+                    
+                    setLiveFeedEvents(prev => [{ id: Math.random().toString(), ...p }, ...prev].slice(0, 50));
+                  } else if (p.type === 'NEW_PATH_DISCOVERED') {
+                    addTimelineEvent(`New execution path discovered`, true);
+                    setLiveFeedEvents(prev => [{ id: Math.random().toString(), ...p }, ...prev].slice(0, 50));
+                  } else if (p.type === 'CAMPAIGN_COMPLETED') {
+                    addTimelineEvent('Campaign completed successfully');
+                    setDurationMs(p.durationMs || 0);
+                  } else if (p.type === 'CAMPAIGN_ERROR') {
+                    addTimelineEvent(`ERROR: ${p.error}`, true);
+                  }
+                });
+              }
+            } catch (err) {
+              console.error("Parse error", err);
+            }
+          }
+        }
+      }
     } catch (err) {
       console.error("Failed to start", err);
       setAppState('LANDING'); // rollback on err

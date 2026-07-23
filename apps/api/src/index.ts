@@ -54,12 +54,39 @@ app.post('/api/fuzz', (req, res) => {
 
   const limit = typeof maxInputs === 'number' ? Math.max(25, Math.min(250, maxInputs)) : 150;
 
-  // Trigger the orchestrator
-  import('@omega-fuzz/orchestrator').then(({ startCampaign }) => {
-    startCampaign(code, campaignEvents, limit).catch(console.error);
+  // Set up SSE headers on the POST response
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const localEmitter = new EventEmitter();
+  const eventBuffer: any[] = [];
+  let batchTimeout: NodeJS.Timeout | null = null;
+
+  localEmitter.on('internal_event', (event: any) => {
+    eventBuffer.push(event);
+    if (!batchTimeout) {
+      batchTimeout = setTimeout(() => {
+        res.write(`data: ${JSON.stringify({ type: 'BATCH', events: [...eventBuffer] })}\n\n`);
+        if (typeof (res as any).flush === 'function') (res as any).flush();
+        eventBuffer.length = 0;
+        batchTimeout = null;
+      }, 50);
+    }
   });
 
-  res.json({ message: 'Campaign started' });
+  // Trigger the orchestrator
+  import('@omega-fuzz/orchestrator').then(({ startCampaign }) => {
+    startCampaign(code, localEmitter, limit)
+      .then(() => {
+        setTimeout(() => res.end(), 200); // Give time for final batch to flush
+      })
+      .catch((err) => {
+        console.error(err);
+        res.end();
+      });
+  });
 });
 
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
