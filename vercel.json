@@ -1,18 +1,6 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "apps/frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
-    },
-    {
-      "src": "api/index.ts",
-      "use": "@vercel/node"
-    }
-  ],
+  "buildCommand": "turbo run build",
+  "outputDirectory": "apps/frontend/dist",
   "rewrites": [
     {
       "source": "/api/(.*)",
@@ -20,7 +8,7 @@
     },
     {
       "source": "/(.*)",
-      "destination": "/apps/frontend/$1"
+      "destination": "/$1"
     }
   ]
 }
