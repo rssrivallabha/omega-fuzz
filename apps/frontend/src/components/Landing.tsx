@@ -20,11 +20,18 @@ export function Landing({ onStart }: LandingProps) {
   const [maxInputs, setMaxInputs] = useState<number>(150);
   
   useEffect(() => {
-      if (code.includes('def ') || code.includes('import ') && !code.includes('const') && !code.includes('=>')) {
-          setDetectedLang('Python');
-      } else {
-          setDetectedLang('JavaScript');
-      }
+    const codeLower = code.toLowerCase();
+    if (codeLower.includes('select ') || codeLower.includes('insert ') || codeLower.includes('update ')) {
+      setDetectedLang('SQL');
+    } else if (code.includes('func ') && code.includes('package ')) {
+      setDetectedLang('Go');
+    } else if (code.includes('func ') || (code.includes('struct ') && !code.includes('package '))) {
+      setDetectedLang('Swift');
+    } else if (code.includes('def ') || (code.includes('import ') && !code.includes('const') && !code.includes('=>'))) {
+      setDetectedLang('Python');
+    } else {
+      setDetectedLang('JavaScript');
+    }
   }, [code]);
 
   const handleInputLimitChange = (e: React.ChangeEvent<HTMLInputElement>) => {

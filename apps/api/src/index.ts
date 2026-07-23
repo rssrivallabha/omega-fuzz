@@ -84,7 +84,14 @@ app.post('/api/fuzz', (req, res) => {
       })
       .catch((err) => {
         console.error(err);
-        res.end();
+        // If it errors, emit a final error event so the frontend knows
+        localEmitter.emit('internal_event', {
+          schemaVersion: '1.0.0',
+          eventId: uuidv4(),
+          timestamp: new Date().toISOString(),
+          payload: { type: 'CAMPAIGN_ERROR', error: String(err.message || err) }
+        });
+        setTimeout(() => res.end(), 200);
       });
   });
 });
