@@ -41,7 +41,7 @@ export class LocalProcessExecutionBackend implements ExecutionBackend {
   readonly id = 'local-process';
   readonly securityLevel = 'TRUSTED_LOCAL_ONLY';
 
-  private activeProcesses = new Map<string, { harness: string, timeoutMs: number }>();
+  private activeProcesses = new Map<string, { harness: string, timeoutMs: number, sourceCode?: string, targetId?: string }>();
 
   async isAvailable(): Promise<boolean> {
     return true;
@@ -49,13 +49,83 @@ export class LocalProcessExecutionBackend implements ExecutionBackend {
 
   async prepare(request: SandboxRequest): Promise<SandboxHandle> {
     const id = Math.random().toString(36).substring(7);
-    this.activeProcesses.set(id, { harness: request.harnessCode, timeoutMs: request.timeoutMs });
+    this.activeProcesses.set(id, { 
+      harness: request.harnessCode, 
+      timeoutMs: request.timeoutMs, 
+      sourceCode: request.sourceCode,
+      targetId: request.targetId
+    });
     return { id, status: 'PREPARED', language: request.language };
   }
 
   async execute(sandbox: SandboxHandle, request: ExecutionRequest): Promise<RawExecutionResult> {
     const processData = this.activeProcesses.get(sandbox.id);
     if (!processData) throw new Error('Sandbox not found');
+
+    if (sandbox.language === 'javascript') {
+      return new Promise((resolve) => {
+        const start = Date.now();
+        try {
+          const vm = require('vm');
+          if (!processData.sourceCode) throw new Error("No source code available");
+          
+          const context = {
+            console: { log: () => {} },
+            Math, Date, JSON, String, Object, Array, Number, Error, TypeError, RangeError, SyntaxError, ReferenceError,
+            require: (m: string) => { if(m==='crypto') return require('crypto'); return {}; }
+          };
+          vm.createContext(context);
+          vm.runInContext(processData.sourceCode, context);
+          
+          const inputStr = request.inputData.trim();
+          const targetName = processData.targetId || 'global';
+          
+          const harnessExec = `
+            (function() {
+               try {
+                 const input = ${inputStr};
+                 let result = null;
+                 if (typeof ${targetName} === 'function') {
+                    result = ${targetName}(input);
+                 } else {
+                    const keys = Object.keys(globalThis).filter(k => typeof globalThis[k] === 'function');
+                    if(keys.length > 0) result = globalThis[keys[0]](input);
+                 }
+                 return JSON.stringify({ status: "success" });
+               } catch(e) {
+                 return JSON.stringify({ status: "error", type: e.name, message: e.message, trace: e.stack ? e.stack.split('\\n') : [] });
+               }
+            })()
+          `;
+          
+          const result = vm.runInContext(harnessExec, context, { timeout: processData.timeoutMs });
+          
+          resolve({
+             exitCode: 0,
+             terminationSignal: null,
+             stdout: result + '\\n',
+             stderr: '',
+             wallClockDurationMs: Date.now() - start,
+             timeoutStatus: false,
+             oomStatus: false,
+             outputLimitStatus: false,
+             sandboxPolicyViolation: false
+          });
+        } catch (e: any) {
+          resolve({
+             exitCode: 1,
+             terminationSignal: null,
+             stdout: '',
+             stderr: e.message || String(e),
+             wallClockDurationMs: Date.now() - start,
+             timeoutStatus: e.message && e.message.includes('timeout'),
+             oomStatus: false,
+             outputLimitStatus: false,
+             sandboxPolicyViolation: false
+          });
+        }
+      });
+    }
 
     return new Promise((resolve) => {
       const fs = require('fs');
