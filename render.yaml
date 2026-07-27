@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: omega-fuzz-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/stream
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: NODE_ENV
+        value: production
+      - key: OMEGA_ALLOW_UNSAFE_LOCAL_EXECUTION
+        value: true

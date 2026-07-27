@@ -23,6 +23,7 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
   const swiftAdapter = new SwiftAdapter();
   
   // Basic heuristic detection for Go and C++ in addition to JS/Py
+  console.log(`[${new Date().toISOString()}] [DEBUG] Language detection start`);
   let pyScore = (await pyAdapter.detect(sourceCode)).confidence;
   let jsScore = (await jsAdapter.detect(sourceCode)).confidence;
   let goScore = sourceCode.includes('func ') && sourceCode.includes('package ') ? 0.9 : 0;
@@ -49,14 +50,18 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
       adapter = jsAdapter;
       detectedLanguage = 'javascript';
   }
+  console.log(`[${new Date().toISOString()}] [DEBUG] Language detection finish (Detected: ${detectedLanguage})`);
 
+  console.log(`[${new Date().toISOString()}] [DEBUG] Campaign start before emitting CAMPAIGN_STARTED`);
   eventEmitter.emit('internal_event', {
     schemaVersion: '1.0.0',
     eventId: uuidv4(),
     timestamp: new Date().toISOString(),
     payload: { type: 'CAMPAIGN_STARTED', configuration: { target: detectedLanguage, mode: 'end-to-end' } }
   });
+  console.log(`[${new Date().toISOString()}] [DEBUG] Campaign start after emitting CAMPAIGN_STARTED`);
 
+  console.log(`[${new Date().toISOString()}] [DEBUG] Target discovery start`);
   const parsed = await adapter.parse(sourceCode);
   const targets = await adapter.discoverTargets(sourceCode, parsed);
   
@@ -65,6 +70,7 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
   }
 
   const targetNames = targets.map((t: any) => t.name);
+  console.log(`[${new Date().toISOString()}] [DEBUG] Target discovery finish (${targets.length} targets found: ${targetNames.join(', ')})`);
 
   eventEmitter.emit('internal_event', {
       schemaVersion: '1.0.0',
@@ -87,8 +93,13 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
   for (const target of targets) {
       (target as any).source = sourceCode;
 
+      console.log(`[${new Date().toISOString()}] [DEBUG] Constraint extraction start for target: ${target.name}`);
       const constraints = await adapter.extractConstraints(target, {} as any);
+      console.log(`[${new Date().toISOString()}] [DEBUG] Constraint extraction finish for target: ${target.name}`);
+
+      console.log(`[${new Date().toISOString()}] [DEBUG] Seed synthesis start for target: ${target.name}`);
       const seedCorpus = await adapter.synthesizeSeeds(target, constraints);
+      console.log(`[${new Date().toISOString()}] [DEBUG] Seed synthesis finish for target: ${target.name} (${seedCorpus.seeds.length} seeds synthesized)`);
       
       eventEmitter.emit('internal_event', {
           schemaVersion: '1.0.0',
@@ -119,6 +130,7 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
 
       const streamInterval = Math.max(1, Math.floor(inputsPerTarget / 50)); 
       
+      console.log(`[${new Date().toISOString()}] [DEBUG] Execution loop start for target: ${target.name} (${inputsPerTarget} inputs configured)`);
       for (let i = 0; i < inputsPerTarget; i++) {
          const seed = seedCorpus.seeds[i % seedCorpus.seeds.length] || { id: 'rand', input: { value: Math.random() }, discoveryStrategy: 'Fallback' };
          
@@ -209,6 +221,7 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
              });
          }
       }
+      console.log(`[${new Date().toISOString()}] [DEBUG] Execution loop finish for target: ${target.name}`);
 
       await sandboxBackend.destroy(sandbox);
   }
@@ -220,7 +233,8 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
       payload: { type: 'CAMPAIGN_PROGRESS', executed: totalExecuted, durationMs: Date.now() - startTime }
   });
 
-  return {
+  console.log(`[${new Date().toISOString()}] [DEBUG] Report generation start`);
+  const finalReport = {
       campaign_id: campaignId,
       generated_at: new Date().toISOString(),
       target: { language: detectedLanguage, runtime: 'unknown', targets: targetNames },
@@ -228,4 +242,6 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
       findings: allFindings,
       timeline: []
   } as any;
+  console.log(`[${new Date().toISOString()}] [DEBUG] Report generation finish`);
+  return finalReport;
 }

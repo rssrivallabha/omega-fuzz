@@ -191,14 +191,38 @@ except Exception as e:
             compileArgs = ['-o', binaryPath, tempScriptPath];
         }
         
-        const compileResult = spawnSync(compiler, compileArgs);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess start: spawnSync(${compiler})`);
+        const compileStart = Date.now();
+        const compileResult = spawnSync(compiler, compileArgs, { timeout: 10000, encoding: 'utf-8' });
+        const compileDuration = Date.now() - compileStart;
+
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${compiler}) execution time: ${compileDuration}ms`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${compiler}) exit code: ${compileResult?.status ?? null}`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${compiler}) stdout: ${String(compileResult?.stdout || '').slice(0, 500)}`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${compiler}) stderr: ${String(compileResult?.stderr || compileResult?.error?.message || '').slice(0, 500)}`);
+
+        if (compileResult?.error && (compileResult.error as any).code === 'ETIMEDOUT' || compileDuration >= 10000) {
+           console.error(`[${new Date().toISOString()}] [ERROR] Subprocess (${compiler}) timed out after 10000ms`);
+           return resolve({
+             exitCode: null,
+             terminationSignal: 'SIGKILL',
+             stdout: String(compileResult?.stdout || ''),
+             stderr: JSON.stringify({ error: `Subprocess (${compiler}) timed out after 10 seconds`, code: 'TIMEOUT_EXPIRED', timeoutMs: 10000 }),
+             wallClockDurationMs: compileDuration,
+             timeoutStatus: true,
+             oomStatus: false,
+             outputLimitStatus: false,
+             sandboxPolicyViolation: false
+           });
+        }
+
         if (compileResult.status !== 0) {
            return resolve({
-             exitCode: compileResult.status,
+             exitCode: compileResult.status ?? 1,
              terminationSignal: null,
-             stdout: '',
-             stderr: 'Compilation failed: ' + compileResult.stderr.toString(),
-             wallClockDurationMs: 0,
+             stdout: String(compileResult.stdout || ''),
+             stderr: 'Compilation failed: ' + String(compileResult.stderr || compileResult.error?.message || ''),
+             wallClockDurationMs: compileDuration,
              timeoutStatus: false,
              oomStatus: false,
              outputLimitStatus: false,
@@ -207,6 +231,7 @@ except Exception as e:
         }
       }
 
+      console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess start: spawn(${cmd})`);
       const startTime = Date.now();
       const spawnArgs = [...args];
       if (sandbox.language !== 'cpp') spawnArgs.push(tempScriptPath);
@@ -215,50 +240,67 @@ except Exception as e:
       let stdout = '';
       let stderr = '';
 
-      if (request.inputData && !child.stdin.destroyed) {
+      if (child.stdin) {
+          child.stdin.on('error', (err: any) => { /* ignore EPIPE */ });
+          if (request.inputData && !child.stdin.destroyed) {
+              try {
+                  child.stdin.write(request.inputData);
+              } catch(e) {}
+          }
           try {
-              child.stdin.write(request.inputData);
+              child.stdin.end();
           } catch(e) {}
       }
-      try {
-          child.stdin.end();
-      } catch(e) {}
-      child.on('error', (err: any) => { /* ignore */ });
-      child.stdin.on('error', (err: any) => { /* ignore */ });
 
-      child.stdout.on('data', (data: any) => stdout += data.toString());
-      child.stderr.on('data', (data: any) => stderr += data.toString());
+      if (child.stdout) {
+          child.stdout.on('data', (data: any) => stdout += data.toString());
+      }
+      if (child.stderr) {
+          child.stderr.on('data', (data: any) => stderr += data.toString());
+      }
 
       let finished = false;
       const timeoutId = setTimeout(() => {
         if (!finished) {
           finished = true;
-          child.kill('SIGKILL');
+          const execDuration = Date.now() - startTime;
+          try { child.kill('SIGKILL'); } catch(e) {}
+          console.error(`[${new Date().toISOString()}] [ERROR] Subprocess (${cmd}) timed out after 10 seconds. Killed subprocess.`);
+          console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) execution time: ${execDuration}ms`);
+          console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) exit code: null (SIGKILL)`);
+          console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stdout: ${stdout.slice(0, 500)}`);
+          console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stderr: ${stderr.slice(0, 500)}`);
+
           resolve({
             exitCode: null,
             terminationSignal: 'SIGKILL',
             stdout,
-            stderr,
-            wallClockDurationMs: Date.now() - startTime,
+            stderr: JSON.stringify({ error: `Subprocess (${cmd}) execution timed out after 10 seconds`, code: 'TIMEOUT_EXPIRED', timeoutMs: 10000 }),
+            wallClockDurationMs: execDuration,
             timeoutStatus: true,
             oomStatus: false,
             outputLimitStatus: false,
             sandboxPolicyViolation: false
           });
         }
-      }, processData.timeoutMs);
+      }, 10000);
 
       child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
         if (finished) return;
         finished = true;
         clearTimeout(timeoutId);
+        const execDuration = Date.now() - startTime;
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) finished - execution time: ${execDuration}ms`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) exit code: ${code}`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stdout: ${stdout.slice(0, 500)}`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stderr: ${stderr.slice(0, 500)}`);
 
         resolve({
           exitCode: code,
           terminationSignal: signal,
           stdout,
           stderr,
-          wallClockDurationMs: Date.now() - startTime,
+          wallClockDurationMs: execDuration,
           timeoutStatus: false,
           oomStatus: false,
           outputLimitStatus: false,
@@ -270,22 +312,24 @@ except Exception as e:
         if (finished) return;
         finished = true;
         clearTimeout(timeoutId);
+        const execDuration = Date.now() - startTime;
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) errored - execution time: ${execDuration}ms`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) exit code: null`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stdout: ${stdout.slice(0, 500)}`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stderr: ${err.message}`);
         
         resolve({
           exitCode: null,
           terminationSignal: null,
           stdout,
-          stderr: err.message,
-          wallClockDurationMs: Date.now() - startTime,
+          stderr: JSON.stringify({ error: err.message, code: 'SUBPROCESS_ERROR' }),
+          wallClockDurationMs: execDuration,
           timeoutStatus: false,
           oomStatus: false,
           outputLimitStatus: false,
           sandboxPolicyViolation: false
         });
       });
-
-      child.stdin.write(request.inputData);
-      child.stdin.end();
     });
   }
 

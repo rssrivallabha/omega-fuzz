@@ -55,16 +55,28 @@ export class PythonAdapter implements LanguageAdapter {
   }
 
   async parse(source: string): Promise<ParseResult> {
+    console.log(`[${new Date().toISOString()}] [DEBUG] Python AST parser start`);
+    const startTime = Date.now();
     try {
       const parserScript = path.join(__dirname, 'ast_parser.py');
       const result = spawnSync('python', [parserScript], {
         input: source,
         encoding: 'utf-8',
-        timeout: 2000
+        timeout: 10000
       });
 
+      const execTime = Date.now() - startTime;
+      console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess spawnSync(python) execution time: ${execTime}ms`);
+      console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess spawnSync(python) exit code: ${result?.status ?? null}`);
+      console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess spawnSync(python) stdout: ${String(result?.stdout || '').slice(0, 500)}`);
+      console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess spawnSync(python) stderr: ${String(result?.stderr || result?.error?.message || '').slice(0, 500)}`);
+
+      if (result?.error && (result.error as any).code === 'ETIMEDOUT' || execTime >= 10000) {
+        console.error(`[${new Date().toISOString()}] [ERROR] Python AST parser timed out after 10000ms`);
+        return { ast: { error: true, code: 'TIMEOUT_EXPIRED', message: 'Subprocess timed out after 10000ms', fallback: true }, source };
+      }
+
       if (!result || result.error || result.status !== 0) {
-        // Fallback gracefully on serverless runtimes where Python is not installed
         return { ast: { fallback: true }, source };
       }
 
@@ -73,8 +85,12 @@ export class PythonAdapter implements LanguageAdapter {
          return { ast: { fallback: true }, source };
       }
       return { ast, source };
-    } catch (e) {
-      return { ast: { fallback: true }, source };
+    } catch (e: any) {
+      const execTime = Date.now() - startTime;
+      console.error(`[${new Date().toISOString()}] [ERROR] Python AST parser threw exception after ${execTime}ms: ${e.message || String(e)}`);
+      return { ast: { error: true, code: 'EXECUTION_FAILED', message: e.message || String(e), fallback: true }, source };
+    } finally {
+      console.log(`[${new Date().toISOString()}] [DEBUG] Python AST parser exit`);
     }
   }
 
