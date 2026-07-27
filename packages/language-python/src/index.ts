@@ -59,7 +59,8 @@ export class PythonAdapter implements LanguageAdapter {
     const startTime = Date.now();
     try {
       const parserScript = path.join(__dirname, 'ast_parser.py');
-      const result = spawnSync('python', [parserScript], {
+      const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+      const result = spawnSync(pythonCmd, [parserScript], {
         input: source,
         encoding: 'utf-8',
         timeout: 10000

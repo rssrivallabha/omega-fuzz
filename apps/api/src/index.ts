@@ -3,7 +3,7 @@ import cors from 'cors';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { spawnSync } from 'child_process';
-
+import { startCampaign } from '@omega-fuzz/orchestrator';
 // ============================================================================
 // EVENT BUS ABSTRACTION (Message Broker Design for Scalability)
 // ============================================================================
@@ -187,8 +187,8 @@ app.post('/api/fuzz', (req, res) => {
     globalEventBus.publish(campaignId, event);
   });
 
-  import('@omega-fuzz/orchestrator')
-    .then(({ startCampaign }) => startCampaign(code, localEmitter, limit))
+        startCampaign(code, localEmitter, limit)
+    
     .then((report) => {
       record.status = 'COMPLETED';
       record.report = report;

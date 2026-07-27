@@ -30,7 +30,7 @@ COPY packages ./packages
 
 # Install dependencies and build backend packages
 RUN npm install
-RUN npm run build -- --filter=api...
+RUN npm run build
 
 # Configure environment variables
 ENV NODE_ENV=production

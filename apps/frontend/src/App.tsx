@@ -162,8 +162,7 @@ export default function App() {
     };
   }, [appState, campaignId]);
 
-  console.log("🚀 NEW BUILD IS RUNNING");
-alert("NEW BUILD");
+
 
   const handleFuzz = async (code: string, maxInputs: number) => {
   console.log("BUTTON CLICKED");

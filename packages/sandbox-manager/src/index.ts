@@ -139,7 +139,7 @@ export class LocalProcessExecutionBackend implements ExecutionBackend {
 
       if (sandbox.language === 'python') {
         ext = 'py';
-        cmd = 'python';
+        cmd = process.platform === 'win32' ? 'python' : 'python3';
       } else if (sandbox.language === 'javascript') {
         ext = 'js';
         cmd = 'node';
