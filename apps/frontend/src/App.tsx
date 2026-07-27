@@ -162,44 +162,45 @@ export default function App() {
     };
   }, [appState, campaignId]);
 
+  console.log("🚀 NEW BUILD IS RUNNING");
+alert("NEW BUILD");
+
   const handleFuzz = async (code: string, maxInputs: number) => {
-    // Reset state and immediately trigger UI transition to ANALYSIS
-    setAppState('ANALYSIS');
-    setTimeline([]);
-    setFindings([]);
-    setSeedSamples([]);
-    setLiveFeedEvents([]);
-    setEvents([]);
-    setStats({ executed: 0, rate: 0, findings: 0, targets: 0, expectedRejections: 0, unexpectedExceptions: 0, timeouts: 0 });
-    setChartData([]);
-    setStartTime(Date.now());
-    
-    try {
-      const apiUrl = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/fuzz` : '/api/fuzz';
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, maxInputs })
-      });
+  console.log("BUTTON CLICKED");
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: response.statusText }));
-        throw new Error(errorData.error || `Server error ${response.status}`);
-      }
+  setAppState("ANALYSIS");
 
-      const data = await response.json();
-      if (!data.campaignId) {
-        throw new Error("No campaignId returned from POST /api/fuzz");
-      }
+  console.log("API URL:", import.meta.env.VITE_API_URL);
 
-      // Setting campaignId immediately activates the EventSource stream in useEffect!
-      setCampaignId(data.campaignId);
-    } catch (err: any) {
-      console.error("Failed to initiate fuzzing campaign:", err);
-      alert(`Error starting campaign: ${err.message || String(err)}`);
-      setAppState('LANDING'); // rollback on err
-    }
-  };
+  try {
+    const apiUrl = import.meta.env.VITE_API_URL
+      ? `${import.meta.env.VITE_API_URL}/api/fuzz`
+      : "/api/fuzz";
+
+    console.log("Posting to:", apiUrl);
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        code,
+        maxInputs
+      })
+    });
+
+    console.log("Response:", response.status);
+
+    const data = await response.json();
+
+    console.log("Data:", data);
+
+    setCampaignId(data.campaignId);
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   return (
     <>
