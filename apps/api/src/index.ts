@@ -87,7 +87,7 @@ app.post('/api/fuzz', (req, res) => {
         // If it errors, emit a final error event so the frontend knows
         localEmitter.emit('internal_event', {
           schemaVersion: '1.0.0',
-          eventId: uuidv4(),
+          eventId: 'err-' + Math.random().toString(36).substring(2, 11),
           timestamp: new Date().toISOString(),
           payload: { type: 'CAMPAIGN_ERROR', error: String(err.message || err) }
         });
