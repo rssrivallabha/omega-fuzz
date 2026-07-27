@@ -21,12 +21,11 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy root manifests and configuration
-COPY package*.json tsconfig.json turbo.json ./
+COPY package*.json turbo.json ./
 COPY apps/api ./apps/api
 COPY apps/orchestrator ./apps/orchestrator
-COPY apps/fuzz-engine ./apps/fuzz-engine
+COPY packages/fuzz-engine ./packages/fuzz-engine
 COPY apps/worker ./apps/worker
-COPY apps/frontend/package*.json ./apps/frontend/
 COPY packages ./packages
 
 # Install dependencies and build backend packages
