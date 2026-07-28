@@ -496,6 +496,7 @@ if __name__ == "__main__":
                   const frames = data.trace.map((f: any) => `${f.filename}:${f.lineno} in ${f.name}`);
                   return {
                       exceptionType: data.type,
+                      normalizedMessage: data.message,
                       stackTrace: { frames }
                   } as any;
               }

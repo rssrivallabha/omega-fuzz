@@ -1,24 +1,44 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { FuzzFinding } from '../types';
-import { ShieldAlert, Copy, CheckCircle2, ChevronRight, Hash, Database, GitBranch, Cpu, Target } from 'lucide-react';
+import { Copy, CheckCircle2, ChevronRight, Hash, Cpu, GitBranch, Database, Target, AlertTriangle } from 'lucide-react';
 
 interface FindingInspectorProps {
   finding: FuzzFinding;
 }
 
 export function FindingInspector({ finding }: FindingInspectorProps) {
+  const [copied, setCopied] = useState(false);
+
   const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
-  const getSeverityColor = (severity: string = 'HIGH') => {
-    switch (severity) {
-      case 'CRITICAL': return 'var(--accent-danger)';
-      case 'HIGH': return 'var(--accent-orange)';
-      case 'MEDIUM': return 'var(--accent-warning)';
-      default: return 'var(--text-secondary)';
+  const severityLabel = finding.severity || 'Unavailable';
+  const getSeverityColor = (sev: string) => {
+    switch (sev.toUpperCase()) {
+      case 'CRITICAL': return 'var(--accent-red)';
+      case 'HIGH': return 'var(--accent-amber)';
+      case 'MEDIUM': return 'var(--accent-blue)';
+      case 'LOW': return 'var(--accent-green)';
+      default: return 'var(--text-tertiary)';
     }
   };
+
+  const confidenceLabel = typeof finding.confidence === 'number'
+    ? `${finding.confidence}%`
+    : 'Unavailable';
+
+  const inputDisplay = finding.inputData != null
+    ? (typeof finding.inputData === 'object' ? JSON.stringify(finding.inputData) : String(finding.inputData))
+    : 'Unavailable';
+
+  const traceFrames = Array.isArray(finding.trace) && finding.trace.length > 0
+    ? finding.trace
+    : null;
 
   return (
     <motion.div 
@@ -31,75 +51,91 @@ export function FindingInspector({ finding }: FindingInspectorProps) {
         background: 'var(--bg-surface)'
       }}
     >
-      {/* Forensic Header */}
-      <div style={{ padding: '24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface-hover)' }}>
-        <div className="flex justify-between items-start">
+      {/* Header */}
+      <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface-hover)' }}>
+        <div className="finding-header">
           <div className="flex-col gap-2">
-            <div className="flex items-center gap-2 mono text-xs text-secondary font-medium">
+            <div className="flex items-center gap-2 mono text-xs text-secondary" style={{ flexWrap: 'wrap' }}>
               <Hash size={14} /> {finding.id}
-              <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--border-strong)' }} />
-              <Target size={14} /> process_order()
+              {finding.targetFunction && (
+                <>
+                  <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--border-strong)' }} />
+                  <Target size={14} /> {finding.targetFunction}()
+                </>
+              )}
             </div>
             <h3 style={{ fontSize: '18px', color: 'var(--text-primary)', fontWeight: 600, margin: 0, letterSpacing: '-0.01em' }}>
-              {finding.type || 'Unexpected Exception'}
+              {finding.type || 'Unknown Exception'}
             </h3>
           </div>
-          <div className="flex gap-2">
-            <div className="badge badge-neutral flex items-center gap-1" style={{ color: getSeverityColor('HIGH'), border: `1px solid ${getSeverityColor('HIGH')}40` }}>
-              <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: getSeverityColor('HIGH') }} /> HIGH SEVERITY
+          <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+            <div className="badge badge-neutral flex items-center gap-1" style={{ color: getSeverityColor(severityLabel), border: `1px solid ${getSeverityColor(severityLabel)}40` }}>
+              <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: getSeverityColor(severityLabel) }} />
+              {severityLabel.toUpperCase()}
             </div>
             <div className="badge badge-neutral" style={{ background: 'var(--bg-surface-active)' }}>
-              98% CONFIDENCE
+              {confidenceLabel !== 'Unavailable' ? `${confidenceLabel} confidence` : 'Confidence: Unavailable'}
             </div>
           </div>
         </div>
       </div>
       
-      {/* Forensic Body */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px', padding: '24px' }}>
+      {/* Body */}
+      <div className="finding-body" style={{ padding: '24px' }}>
         
         <div className="flex-col gap-6">
           <div>
-            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider mb-2">Message</div>
+            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider" style={{ marginBottom: '8px' }}>Message</div>
             <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-              {finding.message || 'Execution crashed during bounds testing.'}
+              {finding.message || 'Unavailable'}
             </div>
           </div>
 
           <div>
-            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider mb-2">Trace Location</div>
+            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider" style={{ marginBottom: '8px' }}>Trace Location</div>
             <div className="mono text-xs" style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
-              {finding.location}
+              {finding.location || 'Unavailable'}
             </div>
           </div>
 
           <div>
-            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider mb-2">Minimized Input</div>
-            <div className="mono text-xs" style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--accent-warning)', wordBreak: 'break-all' }}>
-              {'{ "price": -1, "discount": 0 }'}
+            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider" style={{ marginBottom: '8px' }}>Triggering Input</div>
+            <div className="mono text-xs" style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--accent-amber)', wordBreak: 'break-all' }}>
+              {inputDisplay}
             </div>
           </div>
         </div>
 
-        <div className="flex-col gap-6" style={{ paddingLeft: '24px', borderLeft: '1px solid var(--border-subtle)' }}>
+        <div className="finding-meta" style={{ paddingLeft: '24px', borderLeft: '1px solid var(--border-subtle)' }}>
           <div>
-            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider mb-2 flex items-center gap-2"><Cpu size={14} /> Execution Path</div>
+            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider flex items-center gap-2" style={{ marginBottom: '8px' }}><Cpu size={14} /> Execution Trace</div>
             <div className="flex-col gap-2">
-              <div className="flex items-center gap-2 text-xs mono text-secondary"><CheckCircle2 size={12} className="text-tertiary" /> Type validation</div>
-              <div className="flex items-center gap-2 text-xs mono text-secondary"><CheckCircle2 size={12} className="text-tertiary" /> Required fields</div>
-              <div className="flex items-center gap-2 text-xs mono" style={{ color: 'var(--accent-danger)' }}><ChevronRight size={12} /> Discount logic</div>
+              {traceFrames ? traceFrames.map((frame, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs mono text-secondary">
+                  {i === traceFrames.length - 1 
+                    ? <ChevronRight size={12} style={{ color: 'var(--accent-red)' }} />
+                    : <CheckCircle2 size={12} className="text-tertiary" />
+                  }
+                  <span style={{ wordBreak: 'break-all' }}>{frame}</span>
+                </div>
+              )) : (
+                <div className="text-xs text-tertiary mono">Unavailable</div>
+              )}
             </div>
           </div>
 
           <div>
-            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider mb-2 flex items-center gap-2"><GitBranch size={14} /> Discovery Strategy</div>
-            <div className="text-sm text-secondary">Constraint Synthesis (Boundary Shift)</div>
+            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider flex items-center gap-2" style={{ marginBottom: '8px' }}><GitBranch size={14} /> Discovery Strategy</div>
+            <div className="text-sm text-secondary">{finding.discoveryStrategy || 'Unavailable'}</div>
           </div>
 
           <div>
-            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider mb-2 flex items-center gap-2"><Database size={14} /> Reproducibility</div>
-            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--accent-success)' }}>
-              <CheckCircle2 size={16} /> Confirmed (10/10)
+            <div className="text-xs text-tertiary font-semibold uppercase tracking-wider flex items-center gap-2" style={{ marginBottom: '8px' }}><Database size={14} /> Reproducibility</div>
+            <div className="flex items-center gap-2 text-sm" style={{ color: finding.reproducible ? 'var(--accent-green)' : 'var(--text-tertiary)' }}>
+              {finding.reproducible 
+                ? <><CheckCircle2 size={16} /> Confirmed</>
+                : <><AlertTriangle size={16} /> Not verified</>
+              }
             </div>
           </div>
         </div>
@@ -126,7 +162,8 @@ export function FindingInspector({ finding }: FindingInspectorProps) {
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-surface-active)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-surface)'}
         >
-          <Copy size={14} className="text-secondary" /> Extract JSON Record
+          <Copy size={14} className="text-secondary" />
+          {copied ? 'Copied!' : 'Extract JSON Record'}
         </button>
       </div>
     </motion.div>

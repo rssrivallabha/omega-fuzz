@@ -15,6 +15,16 @@ import { SwiftAdapter } from '@omega-fuzz/language-swift';
 export async function startCampaign(sourceCode: string, eventEmitter: EventEmitter, maxInputs: number = 200): Promise<CanonicalReport> {
   const campaignId = uuidv4();
   
+  const computeSeverity = (exType: string): string => {
+    const type = (exType || '').toLowerCase();
+    if (type.includes('segfault') || type.includes('segmentation') || type.includes('buffer') || type.includes('memory')) return 'CRITICAL';
+    if (type.includes('assertion') || type.includes('panic')) return 'HIGH';
+    if (type.includes('typeerror') || type.includes('attributeerror') || type.includes('referenceerror')) return 'HIGH';
+    if (type.includes('valueerror') || type.includes('keyerror') || type.includes('indexerror')) return 'MEDIUM';
+    if (type.includes('zerodivision') || type.includes('overflow') || type.includes('underflow')) return 'HIGH';
+    return 'MEDIUM';
+  };
+
   const pyAdapter = new PythonAdapter();
   const jsAdapter = new JavaScriptAdapter();
   const goAdapter = new GoAdapter();
@@ -57,7 +67,7 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
     schemaVersion: '1.0.0',
     eventId: uuidv4(),
     timestamp: new Date().toISOString(),
-    payload: { type: 'CAMPAIGN_STARTED', configuration: { target: detectedLanguage, mode: 'end-to-end' } }
+    payload: { type: 'CAMPAIGN_STARTED', configuration: { target: detectedLanguage, mode: 'end-to-end', executionBackend: 'Local Process' } }
   });
   console.log(`[${new Date().toISOString()}] [DEBUG] Campaign start after emitting CAMPAIGN_STARTED`);
 
@@ -179,7 +189,10 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
                          inputData: seed.input.value,
                          discoveryStrategy: finding.discoveryStrategy,
                          targetFunction: finding.targetFunction,
-                         exceptionMessage: finding.exceptionMessage
+                         exceptionMessage: finding.exceptionMessage,
+                         severity: computeSeverity(normalizedCrash.exceptionType),
+                         confidence: classification.confidence || 70,
+                         trace: (normalizedCrash.stackTrace as any)?.frames || []
                      }
                  });
                  
@@ -192,7 +205,8 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
                         inputId: seed.id, 
                         inputData: seed.input.value,
                         outcome: 'UNEXPECTED_EXCEPTION',
-                        exceptionType: normalizedCrash.exceptionType
+                        exceptionType: normalizedCrash.exceptionType,
+                        exceptionMessage: normalizedCrash.normalizedMessage
                     }
                  });
              }

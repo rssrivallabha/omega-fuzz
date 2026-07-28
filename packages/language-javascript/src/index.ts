@@ -171,6 +171,7 @@ rl.on('line', (line) => {
           const parsed = JSON.parse(line);
           return {
             exceptionType: parsed.type,
+            normalizedMessage: parsed.message,
             stackTrace: {
               frames: parsed.trace.slice(1).map((f: string) => f) // skip the error message line
             } as any

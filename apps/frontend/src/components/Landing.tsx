@@ -4,17 +4,18 @@ import { Code2, Play, Activity, Settings2 } from 'lucide-react';
 
 interface LandingProps {
   onStart: (code: string, maxInputs: number) => void;
+  initialCode?: string;
 }
 
-export function Landing({ onStart }: LandingProps) {
-  const [code, setCode] = useState(
-`def process_transaction(tx):
+const DEFAULT_CODE = `def process_transaction(tx):
     if not tx.get("id"):
         raise ValueError("Missing ID")
     if tx.get("amount", 0) < 0:
         raise ValueError("Invalid Amount")
-    return {"status": "success", "data": tx}`
-  );
+    return {"status": "success", "data": tx}`;
+
+export function Landing({ onStart, initialCode }: LandingProps) {
+  const [code, setCode] = useState(initialCode || DEFAULT_CODE);
   
   const [detectedLang, setDetectedLang] = useState('Python');
   const [maxInputs, setMaxInputs] = useState<number>(150);
@@ -48,14 +49,14 @@ export function Landing({ onStart }: LandingProps) {
   const estimatedSeconds = (maxInputs / 15).toFixed(1);
 
   return (
-    <div className="flex-col items-center justify-center" style={{ minHeight: '100vh', padding: '2rem' }}>
+    <div className="flex-col items-center justify-center" style={{ minHeight: '100vh', padding: '1.5rem' }}>
       
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: "easeOut" }}
         className="flex-col items-center gap-2"
-        style={{ marginBottom: '2.5rem' }}
+        style={{ marginBottom: '2rem' }}
       >
         <div className="flex items-center gap-3">
           <Activity size={24} color="var(--accent-brand)" />
@@ -92,7 +93,8 @@ export function Landing({ onStart }: LandingProps) {
           spellCheck={false}
           style={{
             width: '100%',
-            height: '320px',
+            minHeight: '240px',
+            maxHeight: '400px',
             background: 'transparent',
             border: 'none',
             color: 'var(--text-primary)',
@@ -100,12 +102,12 @@ export function Landing({ onStart }: LandingProps) {
             fontFamily: 'var(--font-mono)',
             fontSize: '14px',
             lineHeight: 1.6,
-            resize: 'none',
+            resize: 'vertical',
             outline: 'none'
           }}
         />
 
-        {/* Configuration Panel */}
+        {/* Configuration Panel - Responsive */}
         <div style={{ 
           padding: '16px 20px', 
           background: 'var(--bg-surface)', 
@@ -118,9 +120,9 @@ export function Landing({ onStart }: LandingProps) {
             <Settings2 size={16} /> Campaign Configuration
           </div>
           
-          <div className="flex items-center gap-6">
-            <div className="flex-col gap-1 flex-1">
-              <div className="flex justify-between text-xs text-tertiary mb-1">
+          <div className="landing-config">
+            <div className="flex-col gap-1" style={{ flex: 1, minWidth: '150px' }}>
+              <div className="flex justify-between text-xs text-tertiary" style={{ marginBottom: '4px' }}>
                 <span>Input Volume</span>
                 <span className="mono">{maxInputs} / 250</span>
               </div>
@@ -157,34 +159,14 @@ export function Landing({ onStart }: LandingProps) {
               <span className="text-xs text-tertiary">inputs</span>
             </div>
 
-            <div style={{ height: '32px', width: '1px', background: 'var(--border-subtle)' }} />
-
-            <div className="flex-col gap-1 min-w-[120px]">
+            <div className="landing-config-meta">
               <div className="text-xs text-tertiary">Est. Duration</div>
               <div className="text-sm mono text-secondary">~{estimatedSeconds}s</div>
             </div>
 
-            <div className="flex-1" />
-
             <button
               onClick={() => onStart(code, maxInputs)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                background: 'var(--text-primary)',
-                color: 'var(--bg-app)',
-                border: 'none',
-                padding: '8px 24px',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '0.875rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'transform 0.1s ease'
-              }}
-              onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.97)'}
-              onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              className="landing-start-btn"
             >
               <Play size={14} fill="currentColor" />
               Initialize Engine
