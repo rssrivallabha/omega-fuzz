@@ -34,3 +34,18 @@ def handle_user_profile(user_data):
     # Will crash due to missing type check on age (if we pass a string)
     years_until_retirement = 65 - profile['age']
     return years_until_retirement
+
+
+# TARGET 4: JSON & Structured Parser
+# Purpose: Prove parsing rejection classifications (expected domain rejections) vs logic crashes on malformed data structures.
+
+import json
+
+def parse_and_process(payload):
+    data = json.loads(payload)
+    if not isinstance(data, dict):
+        raise ValueError("Root payload must be a dictionary")
+    
+    divisor = data.get('scale', 1)
+    return 100 / divisor
+

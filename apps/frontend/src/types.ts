@@ -44,4 +44,6 @@ export interface CampaignHistoryEntry {
   findings: FuzzFinding[];
   stats: FuzzStats;
   events?: FuzzEvent[];
+  isPinned?: boolean;
+  isFavorite?: boolean;
 }

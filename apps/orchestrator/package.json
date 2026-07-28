@@ -16,9 +16,11 @@
     "@omega-fuzz/language-sql": "*",
     "@omega-fuzz/language-swift": "*",
     "@omega-fuzz/sandbox-manager": "*",
+    "@omega-fuzz/fuzz-engine": "*",
     "uuid": "^14.0.1"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "@types/uuid": "^10.0.0",
     "typescript": "^5.0.0"
   }

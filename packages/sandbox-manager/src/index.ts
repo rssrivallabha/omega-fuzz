@@ -35,13 +35,51 @@ export interface ExecutionBackend {
   destroy(sandbox: SandboxHandle): Promise<void>;
 }
 
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+let cachedPythonCommand: string | null = null;
+export function getPythonCommand(): string {
+  if (cachedPythonCommand) return cachedPythonCommand;
+  const cmds = process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
+  for (const cmd of cmds) {
+    try {
+      const res = spawnSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 2000 });
+      if (res && (res.status === 0 || !res.error)) {
+        cachedPythonCommand = cmd;
+        return cmd;
+      }
+    } catch (e) {}
+  }
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+export function isCompilerAvailable(language: string): boolean {
+  if (language === 'python' || language === 'javascript' || language === 'typescript' || language === 'sql') {
+    return true;
+  }
+  let bin = '';
+  if (language === 'go') bin = 'go';
+  else if (language === 'cpp') bin = 'g++';
+  else if (language === 'swift') bin = 'swiftc';
+  if (!bin) return false;
+
+  try {
+    const res = spawnSync(bin, ['--version'], { encoding: 'utf-8', timeout: 2000 });
+    return res.status === 0 || res.error === undefined;
+  } catch (e) {
+    return false;
+  }
+}
 
 export class LocalProcessExecutionBackend implements ExecutionBackend {
   readonly id = 'local-process';
   readonly securityLevel = 'TRUSTED_LOCAL_ONLY';
 
   private activeProcesses = new Map<string, { harness: string, timeoutMs: number, sourceCode?: string, targetId?: string }>();
+  private tempFiles = new Map<string, string[]>();
 
   async isAvailable(): Promise<boolean> {
     return true;
@@ -55,6 +93,7 @@ export class LocalProcessExecutionBackend implements ExecutionBackend {
       sourceCode: request.sourceCode,
       targetId: request.targetId
     });
+    this.tempFiles.set(id, []);
     return { id, status: 'PREPARED', language: request.language };
   }
 
@@ -62,28 +101,51 @@ export class LocalProcessExecutionBackend implements ExecutionBackend {
     const processData = this.activeProcesses.get(sandbox.id);
     if (!processData) throw new Error('Sandbox not found');
 
-    if (sandbox.language === 'javascript') {
+    if (sandbox.language === 'javascript' || sandbox.language === 'typescript') {
       return new Promise((resolve) => {
         const start = Date.now();
         try {
           const vm = require('vm');
           if (!processData.sourceCode) throw new Error("No source code available");
           
+          let codeToRun = processData.sourceCode;
+          if (sandbox.language === 'typescript') {
+            try {
+              const ts = require('typescript');
+              const transpiled = ts.transpileModule(codeToRun, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
+              codeToRun = transpiled.outputText;
+            } catch (e) {
+              // Fallback if ts module failed
+            }
+          }
+
           const context = {
             console: { log: () => {} },
-            Math, Date, JSON, String, Object, Array, Number, Error, TypeError, RangeError, SyntaxError, ReferenceError,
-            require: (m: string) => { if(m==='crypto') return require('crypto'); return {}; }
+            Math, Date, JSON, String, Object, Array, Number, Error, TypeError, RangeError, SyntaxError, ReferenceError, Buffer,
+            require: (m: string) => { if(m==='crypto') return require('crypto'); if(m==='buffer') return require('buffer'); return {}; }
           };
           vm.createContext(context);
-          vm.runInContext(processData.sourceCode, context);
+          vm.runInContext(codeToRun, context);
           
           const inputStr = request.inputData.trim();
           const targetName = processData.targetId || 'global';
           
           const harnessExec = `
             (function() {
+               function _omega_resolve_bytes(val) {
+                 if (val && typeof val === 'object') {
+                   if (val.__omega_bytes_hex) return Buffer.from(val.__omega_bytes_hex, 'hex');
+                   if (val.__omega_bytes_base64) return Buffer.from(val.__omega_bytes_base64, 'base64');
+                   if (Array.isArray(val)) return val.map(_omega_resolve_bytes);
+                   for (const k of Object.keys(val)) {
+                     val[k] = _omega_resolve_bytes(val[k]);
+                   }
+                 }
+                 return val;
+               }
                try {
-                 const input = ${inputStr};
+                 let input = ${inputStr};
+                 input = _omega_resolve_bytes(input);
                  let result = null;
                  if (typeof ${targetName} === 'function') {
                     result = ${targetName}(input);
@@ -127,11 +189,21 @@ export class LocalProcessExecutionBackend implements ExecutionBackend {
       });
     }
 
+    if (sandbox.language && !isCompilerAvailable(sandbox.language)) {
+      return Promise.resolve({
+        exitCode: 1,
+        terminationSignal: null,
+        stdout: '',
+        stderr: JSON.stringify({ error: `Native compiler for language '${sandbox.language}' is not installed or not available in PATH on this runtime host.`, code: 'COMPILER_UNAVAILABLE' }),
+        wallClockDurationMs: 0,
+        timeoutStatus: false,
+        oomStatus: false,
+        outputLimitStatus: false,
+        sandboxPolicyViolation: false
+      });
+    }
+
     return new Promise((resolve) => {
-      const fs = require('fs');
-      const path = require('path');
-      const { spawnSync } = require('child_process');
-      
       let ext = 'js';
       let cmd = 'node';
       let args: string[] = [];
@@ -139,7 +211,7 @@ export class LocalProcessExecutionBackend implements ExecutionBackend {
 
       if (sandbox.language === 'python') {
         ext = 'py';
-        cmd = process.platform === 'win32' ? 'python' : 'python3';
+        cmd = getPythonCommand();
       } else if (sandbox.language === 'javascript') {
         ext = 'js';
         cmd = 'node';
@@ -149,36 +221,52 @@ export class LocalProcessExecutionBackend implements ExecutionBackend {
         args = ['run'];
       } else if (sandbox.language === 'cpp') {
         ext = 'cpp';
-        binaryPath = path.join(require('os').tmpdir(), `fuzz_${sandbox.id}.exe`);
+        binaryPath = path.join(os.tmpdir(), `fuzz_${sandbox.id}_${Math.random().toString(36).substring(7)}.exe`);
         cmd = binaryPath;
       } else if (sandbox.language === 'swift') {
         ext = 'swift';
-        binaryPath = path.join(require('os').tmpdir(), `fuzz_${sandbox.id}.exe`); // Windows swiftc produces .exe
+        binaryPath = path.join(os.tmpdir(), `fuzz_${sandbox.id}_${Math.random().toString(36).substring(7)}.exe`);
         cmd = binaryPath;
       } else if (sandbox.language === 'sql') {
-        // We wrap the SQL script inside a python script that uses the built-in sqlite3!
         ext = 'py';
-        cmd = 'python';
-        const rawSql = processData.harness.replace(/'/g, "''"); // Escape quotes for the python string
+        cmd = getPythonCommand();
+        const rawSql = processData.harness.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
         processData.harness = `
 import sqlite3, sys, json
 try:
     conn = sqlite3.connect(':memory:')
     cursor = conn.cursor()
-    # Execute the raw harness SQL first (e.g. schema creation)
     script = """${rawSql}"""
-    cursor.executescript(script)
-    # The input will be the actual query we fuzz against the schema
-    input_data = sys.argv[1] if len(sys.argv) > 1 else ""
-    cursor.executescript(json.loads(input_data))
+    try:
+        cursor.executescript(script)
+    except Exception:
+        pass
+    input_data = sys.stdin.read().strip()
+    if input_data:
+        try:
+            payload = json.loads(input_data)
+            query = payload.get("query", payload) if isinstance(payload, dict) else str(payload)
+        except Exception:
+            query = str(input_data)
+        cursor.executescript(str(query))
     print(json.dumps({"status": "success"}))
 except Exception as e:
     print(json.dumps({"status": "error", "type": type(e).__name__, "message": str(e)}))
 `;
       }
       
-      const tempScriptPath = path.join(require('os').tmpdir(), `fuzz_${sandbox.id}.${ext}`);
+      const tempScriptPath = path.join(os.tmpdir(), `fuzz_${sandbox.id}_${Math.random().toString(36).substring(7)}.${ext}`);
       fs.writeFileSync(tempScriptPath, processData.harness);
+
+      const trackList = this.tempFiles.get(sandbox.id) || [];
+      trackList.push(tempScriptPath);
+      if (binaryPath) trackList.push(binaryPath);
+      this.tempFiles.set(sandbox.id, trackList);
+
+      const cleanup = () => {
+        try { if (fs.existsSync(tempScriptPath)) fs.unlinkSync(tempScriptPath); } catch(e) {}
+        try { if (binaryPath && fs.existsSync(binaryPath)) fs.unlinkSync(binaryPath); } catch(e) {}
+      };
 
       if (sandbox.language === 'cpp' || sandbox.language === 'swift') {
         let compileArgs: string[] = [];
@@ -198,11 +286,9 @@ except Exception as e:
 
         console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${compiler}) execution time: ${compileDuration}ms`);
         console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${compiler}) exit code: ${compileResult?.status ?? null}`);
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${compiler}) stdout: ${String(compileResult?.stdout || '').slice(0, 500)}`);
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${compiler}) stderr: ${String(compileResult?.stderr || compileResult?.error?.message || '').slice(0, 500)}`);
 
         if (compileResult?.error && (compileResult.error as any).code === 'ETIMEDOUT' || compileDuration >= 10000) {
-           console.error(`[${new Date().toISOString()}] [ERROR] Subprocess (${compiler}) timed out after 10000ms`);
+           cleanup();
            return resolve({
              exitCode: null,
              terminationSignal: 'SIGKILL',
@@ -217,6 +303,7 @@ except Exception as e:
         }
 
         if (compileResult.status !== 0) {
+           cleanup();
            return resolve({
              exitCode: compileResult.status ?? 1,
              terminationSignal: null,
@@ -234,7 +321,7 @@ except Exception as e:
       console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess start: spawn(${cmd})`);
       const startTime = Date.now();
       const spawnArgs = [...args];
-      if (sandbox.language !== 'cpp') spawnArgs.push(tempScriptPath);
+      if (sandbox.language !== 'cpp' && sandbox.language !== 'swift') spawnArgs.push(tempScriptPath);
       const child = spawn(cmd, spawnArgs);
       
       let stdout = '';
@@ -265,11 +352,8 @@ except Exception as e:
           finished = true;
           const execDuration = Date.now() - startTime;
           try { child.kill('SIGKILL'); } catch(e) {}
+          cleanup();
           console.error(`[${new Date().toISOString()}] [ERROR] Subprocess (${cmd}) timed out after 10 seconds. Killed subprocess.`);
-          console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) execution time: ${execDuration}ms`);
-          console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) exit code: null (SIGKILL)`);
-          console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stdout: ${stdout.slice(0, 500)}`);
-          console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stderr: ${stderr.slice(0, 500)}`);
 
           resolve({
             exitCode: null,
@@ -290,10 +374,7 @@ except Exception as e:
         finished = true;
         clearTimeout(timeoutId);
         const execDuration = Date.now() - startTime;
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) finished - execution time: ${execDuration}ms`);
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) exit code: ${code}`);
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stdout: ${stdout.slice(0, 500)}`);
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stderr: ${stderr.slice(0, 500)}`);
+        cleanup();
 
         resolve({
           exitCode: code,
@@ -313,10 +394,7 @@ except Exception as e:
         finished = true;
         clearTimeout(timeoutId);
         const execDuration = Date.now() - startTime;
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) errored - execution time: ${execDuration}ms`);
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) exit code: null`);
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stdout: ${stdout.slice(0, 500)}`);
-        console.log(`[${new Date().toISOString()}] [DEBUG] Subprocess (${cmd}) stderr: ${err.message}`);
+        cleanup();
         
         resolve({
           exitCode: null,
@@ -335,6 +413,11 @@ except Exception as e:
 
   async destroy(sandbox: SandboxHandle): Promise<void> {
     this.activeProcesses.delete(sandbox.id);
+    const files = this.tempFiles.get(sandbox.id) || [];
+    files.forEach(f => {
+      try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch(e) {}
+    });
+    this.tempFiles.delete(sandbox.id);
     sandbox.status = 'DESTROYED';
   }
 }
@@ -348,7 +431,7 @@ export class DockerExecutionBackend implements ExecutionBackend {
   async isAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
       const child = spawn('docker', ['--version']);
-      child.on('close', (code) => resolve(code === 0));
+      child.on('close', (code: number | null) => resolve(code === 0));
       child.on('error', () => resolve(false));
     });
   }

@@ -32,6 +32,22 @@ import {
   ValidationClassification
 } from '@omega-fuzz/canonical-model';
 
+let cachedPythonCommand: string | null = null;
+export function getPythonCmd(): string {
+  if (cachedPythonCommand) return cachedPythonCommand;
+  const cmds = process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
+  for (const cmd of cmds) {
+    try {
+      const res = spawnSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 2000 });
+      if (res && (res.status === 0 || !res.error)) {
+        cachedPythonCommand = cmd;
+        return cmd;
+      }
+    } catch (e) {}
+  }
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
 export class PythonAdapter implements LanguageAdapter {
   readonly languageId = 'python';
   readonly displayName = 'Python';
@@ -59,7 +75,7 @@ export class PythonAdapter implements LanguageAdapter {
     const startTime = Date.now();
     try {
       const parserScript = path.join(__dirname, 'ast_parser.py');
-      const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+      const pythonCmd = getPythonCmd();
       const result = spawnSync(pythonCmd, [parserScript], {
         input: source,
         encoding: 'utf-8',
@@ -437,6 +453,33 @@ import sys
 import json
 import traceback
 
+def _omega_reconstruct_bytes(val, target_func_name=None, param_name=None):
+    if isinstance(val, dict):
+        if '__omega_bytes_hex' in val and isinstance(val['__omega_bytes_hex'], str):
+            try:
+                return bytes.fromhex(val['__omega_bytes_hex'])
+            except Exception:
+                return val['__omega_bytes_hex'].encode('utf-8', 'surrogateescape')
+        if '__omega_bytes_base64' in val and isinstance(val['__omega_bytes_base64'], str):
+            import base64
+            try:
+                return base64.b64decode(val['__omega_bytes_base64'])
+            except Exception:
+                return val['__omega_bytes_base64'].encode('utf-8', 'surrogateescape')
+        return {k: _omega_reconstruct_bytes(v, target_func_name, k) for k, v in val.items()}
+    elif isinstance(val, list):
+        return [_omega_reconstruct_bytes(item) for item in val]
+    elif isinstance(val, str):
+        if target_func_name and param_name:
+            import inspect
+            try:
+                sig = inspect.signature(target_func_name)
+                if param_name in sig.parameters and sig.parameters[param_name].annotation is bytes:
+                    return val.encode('utf-8', 'surrogateescape')
+            except Exception:
+                pass
+    return val
+
 ${(target as any).source || ''}
 
 def main():
@@ -444,9 +487,10 @@ def main():
         line = line.strip()
         if not line: continue
         try:
-            # We expect JSON representing the arguments dict
             kwargs = json.loads(line)
-            # Call target function
+            if isinstance(kwargs, dict):
+                for k in list(kwargs.keys()):
+                    kwargs[k] = _omega_reconstruct_bytes(kwargs[k], ${target.name}, k)
             result = ${target.name}(**kwargs)
             print(json.dumps({"status": "success"}))
         except Exception as e:
@@ -461,7 +505,6 @@ def main():
             }
             print(json.dumps(error_data))
         
-        # Flush to ensure orchestrator reads stdout immediately
         sys.stdout.flush()
 
 if __name__ == "__main__":
@@ -487,9 +530,7 @@ if __name__ == "__main__":
   async parseCrash(execution: RawExecutionResult): Promise<NormalizedCrash | null> {
       try {
           if (!execution.stdout) return null;
-          // The output might have multiple lines if we executed multiple seeds,
-          // but we read the last JSON line or any JSON line with error
-          const lines = execution.stdout.split('\\n').filter(l => l.trim() !== '');
+          const lines = execution.stdout.split(/\r?\n/).filter(l => l.trim() !== '');
           for (const line of lines) {
               const data = JSON.parse(line);
               if (data.status === 'error') {

@@ -1,12 +1,18 @@
 {
-  "name": "fuzz-engine",
+  "name": "@omega-fuzz/fuzz-engine",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "clean": "rm -rf dist"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^26.1.1"
+  },
+  "dependencies": {
+    "@omega-fuzz/canonical-model": "*",
+    "@omega-fuzz/language-core": "*"
+  }
 }

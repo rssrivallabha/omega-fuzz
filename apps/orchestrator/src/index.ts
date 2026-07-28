@@ -5,6 +5,7 @@ import { DeduplicationEngine } from './dedup';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { CanonicalReport } from '@omega-fuzz/canonical-model';
+import { MutationEngine } from '@omega-fuzz/fuzz-engine';
 
 import { JavaScriptAdapter } from '@omega-fuzz/language-javascript';
 import { GoAdapter } from '@omega-fuzz/language-go';
@@ -109,13 +110,15 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
 
       console.log(`[${new Date().toISOString()}] [DEBUG] Seed synthesis start for target: ${target.name}`);
       const seedCorpus = await adapter.synthesizeSeeds(target, constraints);
-      console.log(`[${new Date().toISOString()}] [DEBUG] Seed synthesis finish for target: ${target.name} (${seedCorpus.seeds.length} seeds synthesized)`);
+      const mutationEngine = new MutationEngine(target.name, detectedLanguage, sourceCode, seedCorpus.seeds);
+      const baseSeeds = mutationEngine.getInitialPool();
+      console.log(`[${new Date().toISOString()}] [DEBUG] Seed synthesis finish for target: ${target.name} (${baseSeeds.length} baseline grammar/adapter seeds initialized)`);
       
       eventEmitter.emit('internal_event', {
           schemaVersion: '1.0.0',
           eventId: uuidv4(),
           timestamp: new Date().toISOString(),
-          payload: { type: 'SEEDS_GENERATED', seeds: seedCorpus.seeds }
+          payload: { type: 'SEEDS_GENERATED', seeds: baseSeeds }
       });
 
       const harness = await adapter.generateHarness(target, { timeoutMs: 1000 } as any);
@@ -142,7 +145,7 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
       
       console.log(`[${new Date().toISOString()}] [DEBUG] Execution loop start for target: ${target.name} (${inputsPerTarget} inputs configured)`);
       for (let i = 0; i < inputsPerTarget; i++) {
-         const seed = seedCorpus.seeds[i % seedCorpus.seeds.length] || { id: 'rand', input: { value: Math.random() }, discoveryStrategy: 'Fallback' };
+         const seed = mutationEngine.generateLiveInput(i, (target as any).params || (target as any).args || []);
          
          const execResult = await sandboxBackend.execute(sandbox, { inputData: JSON.stringify(seed.input.value) + '\n' });
          
@@ -150,24 +153,28 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
          const normalizedCrash = await adapter.parseCrash(execResult);
          
          // Use the AST-backed classifier
-         const classification = classifier.classify(execResult, {} as any, constraints);
+         const classification = classifier.classify(execResult, {} as any, constraints, normalizedCrash);
          let outcome = 'SUCCESS';
 
          if (classification.classification === 'EXPECTED_REJECTION' || execResult.stdout.includes('ValueError') || execResult.stderr.includes('ValueError')) {
              outcome = 'EXPECTED_REJECTION';
              totalExpectedRejections++;
-         } else if (normalizedCrash) {
+         } else if (normalizedCrash || (classification.classification as string) === 'UNEXPECTED_EXCEPTION' || (execResult.exitCode !== 0 && execResult.exitCode !== null) || execResult.stderr.includes('Error') || execResult.stderr.includes('Exception') || execResult.stdout.includes('"status":"error"')) {
              outcome = 'UNEXPECTED_EXCEPTION';
+             const crashType = normalizedCrash?.exceptionType || (classification.reason ? classification.reason.split(': ')[1] : 'UnhandledException') || 'RuntimeError';
+             const crashMsg = normalizedCrash?.normalizedMessage || execResult.stderr.trim() || execResult.stdout.trim() || 'Execution anomaly detected';
+             const frames = (normalizedCrash?.stackTrace as any)?.frames || [execResult.stderr.split('\n')[0] || 'unknown_location'];
+
              const finding = {
                  id: `FND-${totalUniqueFindings + 1}`,
                  targetFunction: target.name,
-                 exceptionMessage: normalizedCrash.normalizedMessage,
+                 exceptionMessage: crashMsg,
                  discoveryStrategy: (seed as any).discoveryStrategy || 'Mutation Strategy',
                  fingerprint: {
                      outcomeCategory: 'UNEXPECTED_EXCEPTION',
-                     exceptionType: normalizedCrash.exceptionType,
-                     rootSourceLocation: (normalizedCrash.stackTrace as any)?.frames[0] || 'unknown',
-                     normalizedMessage: normalizedCrash.normalizedMessage
+                     exceptionType: crashType,
+                     rootSourceLocation: frames[0] || 'unknown',
+                     normalizedMessage: crashMsg
                  },
                  isReproducible: true
              };
@@ -190,9 +197,9 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
                          discoveryStrategy: finding.discoveryStrategy,
                          targetFunction: finding.targetFunction,
                          exceptionMessage: finding.exceptionMessage,
-                         severity: computeSeverity(normalizedCrash.exceptionType),
-                         confidence: classification.confidence || 70,
-                         trace: (normalizedCrash.stackTrace as any)?.frames || []
+                         severity: computeSeverity(crashType),
+                         confidence: classification.confidence || 90,
+                         trace: frames
                      }
                  });
                  
@@ -205,14 +212,14 @@ export async function startCampaign(sourceCode: string, eventEmitter: EventEmitt
                         inputId: seed.id, 
                         inputData: seed.input.value,
                         outcome: 'UNEXPECTED_EXCEPTION',
-                        exceptionType: normalizedCrash.exceptionType,
-                        exceptionMessage: normalizedCrash.normalizedMessage
+                        exceptionType: crashType,
+                        exceptionMessage: crashMsg
                     }
                  });
              }
          }
 
-         if (i % streamInterval === 0 && outcome !== 'UNEXPECTED_EXCEPTION') {
+         if ((i % streamInterval === 0 || (outcome === 'EXPECTED_REJECTION' && totalExpectedRejections <= 30)) && outcome !== 'UNEXPECTED_EXCEPTION') {
              eventEmitter.emit('internal_event', {
                 schemaVersion: '1.0.0',
                 eventId: uuidv4(),

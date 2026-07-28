@@ -2,6 +2,9 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "CommonJS",
+    "moduleResolution": "node",
+    "types": ["node"],
+    "ignoreDeprecations": "5.0",
     "declaration": true,
     "rootDir": "./src",
     "outDir": "./dist",

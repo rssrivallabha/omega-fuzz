@@ -5,6 +5,7 @@ import { Landing } from './components/Landing';
 import { Analysis } from './components/Analysis';
 import { LiveDashboard } from './components/LiveDashboard';
 import { FinalReport } from './components/FinalReport';
+import { ArchiveSidebar } from './components/ArchiveSidebar';
 import { MouseGlow } from './components/MouseGlow';
 import './index.css';
 
@@ -289,50 +290,67 @@ export default function App() {
     setAppState('COMPLETE');
   };
 
+  const handleUpdateHistory = (newHistory: CampaignHistoryEntry[]) => {
+    setCampaignHistory(newHistory);
+    try {
+      localStorage.setItem('omega_fuzz_history', JSON.stringify(newHistory));
+    } catch (e) {
+      console.warn('Could not save updated history:', e);
+    }
+  };
+
   return (
-    <>
+    <div style={{ display: 'flex', minHeight: '100vh', width: '100%', position: 'relative' }}>
       <MouseGlow />
-      <AnimatePresence mode="wait">
-        {appState === 'LANDING' && (
-          <Landing key="landing" onStart={handleFuzz} initialCode={lastSubmittedCode} />
-        )}
-        
-        {appState === 'ANALYSIS' && (
-          <Analysis key="analysis" events={events} onComplete={() => setAppState('LIVE')} />
-        )}
+      <ArchiveSidebar 
+        history={campaignHistory}
+        onSelectCampaign={handleViewHistoryCampaign}
+        onUpdateHistory={handleUpdateHistory}
+        currentCampaignId={campaignId}
+      />
+      <div style={{ flex: 1, overflowX: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <AnimatePresence mode="wait">
+          {appState === 'LANDING' && (
+            <Landing key="landing" onStart={handleFuzz} initialCode={lastSubmittedCode} />
+          )}
+          
+          {appState === 'ANALYSIS' && (
+            <Analysis key="analysis" events={events} onComplete={() => setAppState('LIVE')} />
+          )}
 
-        {appState === 'LIVE' && (
-          <LiveDashboard 
-            key="live"
-            stats={stats} 
-            chartData={chartData}
-            targetName={targetName}
-            findings={findings}
-            startTime={startTime}
-            timeline={timeline}
-            liveFeedEvents={liveFeedEvents}
-            onStop={() => setAppState('COMPLETE')}
-            detectedLanguage={detectedLanguage}
-            executionEnvironment={executionEnvironment}
-          />
-        )}
+          {appState === 'LIVE' && (
+            <LiveDashboard 
+              key="live"
+              stats={stats} 
+              chartData={chartData}
+              targetName={targetName}
+              findings={findings}
+              startTime={startTime}
+              timeline={timeline}
+              liveFeedEvents={liveFeedEvents}
+              onStop={() => setAppState('COMPLETE')}
+              detectedLanguage={detectedLanguage}
+              executionEnvironment={executionEnvironment}
+            />
+          )}
 
-        {appState === 'COMPLETE' && (
-          <FinalReport 
-            key="complete"
-            stats={stats}
-            targetName={targetName}
-            findings={findings}
-            durationMs={durationMs}
-            detectedLanguage={detectedLanguage}
-            campaignHistory={campaignHistory}
-            events={events}
-            onNewCampaign={handleNewCampaign}
-            onRunAgain={handleRunAgain}
-            onViewCampaign={handleViewHistoryCampaign}
-          />
-        )}
-      </AnimatePresence>
-    </>
+          {appState === 'COMPLETE' && (
+            <FinalReport 
+              key="complete"
+              stats={stats}
+              targetName={targetName}
+              findings={findings}
+              durationMs={durationMs}
+              detectedLanguage={detectedLanguage}
+              campaignHistory={campaignHistory}
+              events={events}
+              onNewCampaign={handleNewCampaign}
+              onRunAgain={handleRunAgain}
+              onViewCampaign={handleViewHistoryCampaign}
+            />
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
   );
 }
