@@ -44,15 +44,6 @@ As the campaign runs, the live dashboard visualizes the backend orchestrator's r
 - **Discovery Strategies**: The feed reveals exactly *how* a crash was found (e.g., `Boundary Mutation`, `Constraint Solver`, `Type Mutation`).
 - **Telemetry Chart**: Tracks the aggregate execution rate across your targets.
 
-Once the campaign concludes, click **Export Forensic PDF** to generate a permanent artifact of all discovered vulnerabilities.
-
-## 🌐 Deploying to Vercel
-
-Omega Fuzz is fully configured for zero-setup deployment to Vercel. 
-
-1. Push your repository to GitHub.
-2. Import the repository into your Vercel Dashboard.
-3. **Leave all settings as default.** The included `vercel.json` and `/api` wrapper automatically orchestrate the build process and proxy backend traffic to Vercel Serverless Functions.
 
 ## 🛠 Supported Languages
 
