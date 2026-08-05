@@ -53,10 +53,10 @@ npm run build
 
 ### 4. Start the Engine & UI
 
-Launch both the backend orchestrator and the frontend development server simultaneously:
+Launch both the backend orchestrator and the frontend development server simultaneously using Turborepo:
 
 ```bash
-npm run dev --workspaces
+npm run dev
 ```
 
 Once running, navigate to **`http://localhost:5173`** in your browser to access the Mission Control interface.
