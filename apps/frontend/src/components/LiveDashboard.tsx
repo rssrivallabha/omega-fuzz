@@ -42,9 +42,16 @@ export function LiveDashboard({ stats, chartData, targetName, findings, startTim
   };
 
   const feedEndRef = useRef<HTMLDivElement>(null);
+  const feedContainerRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
-    feedEndRef.current?.scrollIntoView();
+    if (feedContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = feedContainerRef.current;
+      // Only auto-scroll if user is near the bottom (within 100px) to allow scrolling up
+      if (scrollHeight - scrollTop - clientHeight < 100) {
+        feedContainerRef.current.scrollTop = scrollHeight;
+      }
+    }
   }, [liveFeedEvents]);
 
   return (
@@ -103,7 +110,7 @@ export function LiveDashboard({ stats, chartData, targetName, findings, startTim
              <div className="flex items-center gap-2 text-sm font-medium text-secondary" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
                <ActivitySquare size={16} /> Live Execution Feed
              </div>
-             <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+             <div ref={feedContainerRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <AnimatePresence initial={false}>
                   {liveFeedEvents.map((evt) => {
                     const isSuccess = evt.outcome === 'SUCCESS';

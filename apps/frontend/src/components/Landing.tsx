@@ -10,9 +10,16 @@ interface LandingProps {
 const DEFAULT_CODE = `def process_transaction(tx):
     if not tx.get("id"):
         raise ValueError("Missing ID")
-    if tx.get("amount", 0) < 0:
+    
+    amount = tx.get("amount", 0)
+    if amount < 0:
         raise ValueError("Invalid Amount")
-    return {"status": "success", "data": tx}`;
+        
+    # Hidden vulnerability: division by zero if exchange_rate is 0
+    exchange_rate = tx.get("exchange_rate", 1)
+    usd_value = amount / exchange_rate
+    
+    return {"status": "success", "usd_value": usd_value}`;
 
 export function Landing({ onStart, initialCode }: LandingProps) {
   const [code, setCode] = useState(initialCode || DEFAULT_CODE);
